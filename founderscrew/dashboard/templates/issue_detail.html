@@ -1,0 +1,455 @@
+{% extends "base.html" %}
+
+{% block title %}Issue #{{ state.issue.number }} Detail — Founders.crew{% endblock %}
+
+{% block extra_head %}
+<style>
+    .detail-header {
+        margin-bottom: 2rem;
+    }
+
+    .back-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 0.9rem;
+        margin-bottom: 1rem;
+        transition: color 0.2s ease;
+    }
+
+    .back-btn:hover {
+        color: var(--text-main);
+    }
+
+    .timeline {
+        display: flex;
+        justify-content: space-between;
+        background: var(--bg-surface);
+        padding: 1.5rem;
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+        margin-bottom: 2rem;
+        overflow-x: auto;
+    }
+
+    .timeline-step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+        text-align: center;
+        min-width: 80px;
+        opacity: 0.4;
+        transition: opacity 0.3s ease;
+    }
+
+    .timeline-step.active {
+        opacity: 1;
+        font-weight: 700;
+    }
+
+    .timeline-step.completed {
+        opacity: 0.8;
+    }
+
+    .timeline-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.05);
+        border: 2px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.9rem;
+    }
+
+    .timeline-step.active .timeline-icon {
+        border-color: var(--primary);
+        background: rgba(99, 102, 241, 0.2);
+        color: var(--primary);
+        box-shadow: 0 0 12px rgba(99, 102, 241, 0.3);
+    }
+
+    .timeline-step.completed .timeline-icon {
+        border-color: var(--success);
+        background: rgba(16, 185, 129, 0.2);
+        color: var(--success);
+    }
+
+    .timeline-name {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .grid-layout {
+        display: grid;
+        grid-template-columns: 1fr 3fr;
+        gap: 2rem;
+    }
+
+    @media (max-width: 900px) {
+        .grid-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .side-info {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    .main-detail {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+    }
+
+    .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 0.75rem;
+    }
+
+    .panel-title {
+        font-size: 1.2rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .step-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .step-item {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1rem;
+    }
+
+    .step-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+    }
+
+    .step-num {
+        font-weight: 700;
+        font-size: 0.9rem;
+        color: var(--primary);
+    }
+
+    .terminal-view {
+        background: #000;
+        font-family: 'Courier New', Courier, monospace;
+        color: #00ff00;
+        padding: 1rem;
+        border-radius: 8px;
+        overflow-x: auto;
+        max-height: 300px;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .approval-banner {
+        background: rgba(245, 158, 11, 0.1);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        border-radius: 12px;
+        padding: 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 1rem;
+    }
+
+    .approval-text h4 {
+        color: var(--warning);
+        margin-bottom: 0.25rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="detail-header">
+    <a href="/" class="back-btn"><i class="fa-solid fa-arrow-left"></i> Back to Overview</a>
+    <h1 style="font-size: 2rem; font-weight: 800;">Issue #{{ state.issue.number }}: {{ state.issue.title }}</h1>
+    <p style="color: var(--text-muted); margin-top: 0.5rem;">Repository: <strong>{{ state.issue.repository }}</strong></p>
+</div>
+
+<!-- Timeline Visualizer -->
+{% set active_status = state.status.value %}
+<div class="timeline">
+    <div class="timeline-step {% if active_status == 'triage' %}active{% elif active_status != 'failed' %}completed{% endif %}">
+        <div class="timeline-icon"><i class="fa-solid fa-magnifying-glass"></i></div>
+        <div class="timeline-name">Triage</div>
+    </div>
+    <div class="timeline-step {% if active_status == 'planning' or active_status == 'await_plan_approval' %}active{% elif active_status not in ['triage', 'failed'] %}completed{% endif %}">
+        <div class="timeline-icon"><i class="fa-solid fa-clipboard-list"></i></div>
+        <div class="timeline-name">Plan</div>
+    </div>
+    <div class="timeline-step {% if active_status == 'building' %}active{% elif active_status not in ['triage', 'planning', 'await_plan_approval', 'failed'] %}completed{% endif %}">
+        <div class="timeline-icon"><i class="fa-solid fa-hammer"></i></div>
+        <div class="timeline-name">Build</div>
+    </div>
+    <div class="timeline-step {% if active_status == 'testing' %}active{% elif active_status not in ['triage', 'planning', 'await_plan_approval', 'building', 'failed'] %}completed{% endif %}">
+        <div class="timeline-icon"><i class="fa-solid fa-vial"></i></div>
+        <div class="timeline-name">Test</div>
+    </div>
+    <div class="timeline-step {% if active_status == 'qa' or active_status == 'await_qa_approval' %}active{% elif active_status not in ['triage', 'planning', 'await_plan_approval', 'building', 'testing', 'reviewing', 'failed'] %}completed{% endif %}">
+        <div class="timeline-icon"><i class="fa-solid fa-eye"></i></div>
+        <div class="timeline-name">QA</div>
+    </div>
+    <div class="timeline-step {% if active_status in ['deploying', 'await_pr_approval', 'merged'] %}active{% endif %}">
+        <div class="timeline-icon"><i class="fa-solid fa-rocket"></i></div>
+        <div class="timeline-name">Deploy</div>
+    </div>
+</div>
+
+<!-- Auto-refresh details every 5s if workflow is running -->
+<div id="detail-container" 
+     {% if active_status not in ['merged', 'failed'] %}
+     hx-get="/run/{{ state.session_id }}" 
+     hx-select="#detail-body" 
+     hx-target="#detail-container" 
+     hx-trigger="every 5s"
+     {% endif %}>
+    
+    <div id="detail-body" class="grid-layout">
+        <!-- Sidebar Info -->
+        <div class="side-info">
+            <div class="card">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-circle-info"></i> Execution Info</div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 1rem; font-size: 0.9rem;">
+                    <div>
+                        <div style="color: var(--text-muted);">Creator</div>
+                        <div style="font-weight: 600;">@{{ state.issue.creator }}</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--text-muted);">Classification</div>
+                        <span class="badge badge-info">{{ state.issue.classification }}</span>
+                    </div>
+                    <div>
+                        <div style="color: var(--text-muted);">Complexity</div>
+                        <span class="badge badge-warning">{{ state.issue.complexity }}</span>
+                    </div>
+                    {% if state.branch_name %}
+                    <div>
+                        <div style="color: var(--text-muted);">Feature Branch</div>
+                        <code style="background: rgba(255,255,255,0.05); padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.8rem;">{{ state.branch_name }}</code>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            {% if state.issue.affected_files %}
+            <div class="card">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-file-code"></i> Affected Files</div>
+                </div>
+                <ul style="list-style: none; display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem;">
+                    {% for f in state.issue.affected_files %}
+                        <li><i class="fa-solid fa-file" style="color: var(--primary);"></i> <code>{{ f }}</code></li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            
+            {% if active_status != 'merged' %}
+            <div class="card" style="border-color: rgba(99, 102, 241, 0.3);">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-rotate-left"></i> Restart Stage</div>
+                </div>
+                <form action="/run/{{ state.session_id }}/restart" method="POST">
+                    <select name="target_stage" style="width: 100%; padding: 0.6rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: var(--text-main); font-family: inherit; font-size: 0.85rem; margin-bottom: 0.75rem; cursor: pointer;">
+                        <option value="triage">🔍 Triage</option>
+                        <option value="planning">📋 Planning</option>
+                        <option value="building">🔨 Building</option>
+                        <option value="testing">🧪 Testing</option>
+                        <option value="qa">👁️ QA Review</option>
+                        <option value="deploy">🚀 Deploy</option>
+                    </select>
+                    <button type="submit" class="btn" style="width: 100%; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3); color: var(--primary); font-size: 0.85rem;">
+                        <i class="fa-solid fa-rotate-left"></i> Restart from Stage
+                    </button>
+                </form>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
+                    Jump back to any stage in the pipeline. Subsequent stages will be cleared and re-run.
+                </p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Main details -->
+        <div class="main-detail">
+            <!-- Planning Step -->
+            {% if state.plan %}
+            <div class="card">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-clipboard-check"></i> 1. Implementation Plan</div>
+                    <span class="badge {% if state.plan.approved %}badge-success{% else %}badge-warning{% endif %}">
+                        {% if state.plan.approved %}Approved{% else %}Pending Approval{% endif %}
+                    </span>
+                </div>
+                
+                <p style="margin-bottom: 1.5rem; line-height: 1.6;">{{ state.plan.summary }}</p>
+                
+                <div class="step-list">
+                    {% for step in state.plan.steps %}
+                    <div class="step-item">
+                        <div class="step-header">
+                            <span class="step-num">Step {{ step.step_number }}</span>
+                        </div>
+                        <p style="font-size: 0.95rem; line-height: 1.4;">{{ step.description }}</p>
+                        <div style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-muted);">
+                            Affects: {% for f in step.files_affected %}<code>{{ f }}</code> {% endfor %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                {% if (not state.plan.approved and active_status == 'await_plan_approval') or active_status == 'failed' %}
+                <div class="approval-banner" {% if active_status == 'failed' %}style="background: rgba(239, 68, 68, 0.05); border-color: rgba(239, 68, 68, 0.3);"{% endif %}>
+                    <div style="width: 100%;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <div class="approval-text">
+                                {% if active_status == 'failed' %}
+                                <h4 style="color: var(--danger);">Provide Feedback & Replan</h4>
+                                <p style="color: var(--text-muted); font-size: 0.9rem;">The workflow failed. Provide feedback here to generate a new implementation plan and try again.</p>
+                                {% else %}
+                                <h4>Approval Required</h4>
+                                <p style="color: var(--text-muted); font-size: 0.9rem;">Review the plan above. You can approve it or request changes with feedback.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                        
+                        <form action="/run/{{ state.session_id }}/replan" method="POST" style="margin-bottom: 1rem;">
+                            <textarea name="feedback" rows="3" placeholder="Optional: provide feedback for plan refinement, e.g. 'Focus on the data layer first' or 'Also handle edge cases for empty rosters'..." 
+                                style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: var(--text-main); font-family: inherit; font-size: 0.9rem; resize: vertical; margin-bottom: 0.75rem;"></textarea>
+                            <div style="display: flex; gap: 0.75rem; justify-content: flex-end; flex-wrap: wrap;">
+                                <button type="submit" class="btn" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171;">
+                                    <i class="fa-solid fa-pen-to-square"></i> {% if active_status == 'failed' %}Submit Feedback & Replan{% else %}Request Changes{% endif %}
+                                </button>
+                            </div>
+                        </form>
+                        
+                        {% if not state.plan.approved %}
+                        <div style="display: flex; justify-content: flex-end; border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+                            <form action="/run/{{ state.session_id }}/approve" method="POST">
+                                <input type="hidden" name="step_type" value="plan">
+                                <button type="submit" class="btn"><i class="fa-solid fa-check"></i> Approve & Run</button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <!-- Test Results -->
+            {% if state.test_results %}
+            <div class="card">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-vial-circle-check"></i> 2. Test Execution</div>
+                    <span class="badge {% if state.test_results.passed %}badge-success{% else %}badge-danger{% endif %}">
+                        {% if state.test_results.passed %}Passed{% else %}Failed{% endif %}
+                    </span>
+                </div>
+                
+                <div class="step-list">
+                    {% for outcome in state.test_results.outcomes %}
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem;">Command: <code>{{ outcome.test_name }}</code></h4>
+                        <div class="terminal-view">
+                            {{ outcome.output or "Tests ran successfully with no terminal logs." }}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- QA Report -->
+            {% if state.qa_report %}
+            <div class="card">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-image"></i> 3. QA Visual Report</div>
+                    <span class="badge {% if state.qa_report.approved %}badge-success{% else %}badge-warning{% endif %}">
+                        {% if state.qa_report.approved %}Approved{% else %}Awaiting Approval{% endif %}
+                    </span>
+                </div>
+                
+                <p style="line-height: 1.6; margin-bottom: 1rem;">{{ state.qa_report.summary }}</p>
+                
+                {% if not state.qa_report.approved and active_status == 'await_qa_approval' %}
+                <div class="approval-banner">
+                    <div class="approval-text">
+                        <h4>QA Validation Approval</h4>
+                        <p style="color: var(--text-muted); font-size: 0.9rem;">Review the QA findings. Approve to proceed with opening the Pull Request.</p>
+                    </div>
+                    <form action="/run/{{ state.session_id }}/approve" method="POST">
+                        <input type="hidden" name="step_type" value="qa">
+                        <button type="submit" class="btn"><i class="fa-solid fa-check"></i> Approve & Deploy</button>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <!-- PR deployment -->
+            {% if state.pr_url %}
+            <div class="card" style="border-color: rgba(16, 185, 129, 0.3);">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-code-pull-request" style="color: var(--success);"></i> 4. Pull Request Created</div>
+                    <span class="badge badge-success">Active PR</span>
+                </div>
+                <p style="line-height: 1.5; margin-bottom: 1.5rem;">
+                    Founders.crew has successfully completed coding, testing, and QA. The PR is now ready for final human review and merge.
+                </p>
+                <a href="{{ state.pr_url }}" target="_blank" class="btn"><i class="fa-brands fa-github"></i> View Pull Request on GitHub</a>
+            </div>
+            {% endif %}
+            
+            {% if active_status == 'failed' %}
+            <div class="card" style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.05);">
+                <div class="panel-header">
+                    <div class="panel-title" style="color: var(--danger);"><i class="fa-solid fa-circle-exclamation"></i> Workflow Failed</div>
+                    <span class="badge badge-danger">Failure</span>
+                </div>
+                <p style="line-height: 1.5; font-weight: 500;">
+                    Error Details:
+                </p>
+                <div class="terminal-view" style="color: #ff3333; border-color: rgba(239, 68, 68, 0.3); margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                    {{ state.error_message }}
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                    <span style="font-size: 0.85rem; color: var(--text-muted);">
+                        <i class="fa-solid fa-circle-info"></i> Retrying will resume execution from the failed stage.
+                    </span>
+                    <form action="/run/{{ state.session_id }}/retry" method="POST" style="margin: 0;">
+                        <button type="submit" class="btn" style="background-color: var(--warning); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.25);">
+                            <i class="fa-solid fa-rotate-left"></i> Retry & Resume Workflow
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

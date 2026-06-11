@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Founders.crew — System Logs{% endblock %}
+
+{% block extra_head %}
+<style>
+    .logs-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+    
+    .logs-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        background: linear-gradient(to right, #ffffff, #94a3b8);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .logs-actions {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+    }
+    
+    .console-wrapper {
+        background: rgba(10, 15, 30, 0.9);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .console-header {
+        background: rgba(30, 41, 59, 0.5);
+        padding: 0.75rem 1.25rem;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .console-dots {
+        display: flex;
+        gap: 0.35rem;
+    }
+    
+    .console-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 9999px;
+    }
+    
+    .console-dot.red { background: #ef4444; }
+    .console-dot.yellow { background: #f59e0b; }
+    .console-dot.green { background: #10b981; }
+    
+    .console-meta {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        font-family: monospace;
+    }
+    
+    .console-body {
+        padding: 1.5rem;
+        max-height: 65vh;
+        overflow-y: auto;
+        font-family: 'Courier New', Courier, monospace;
+        scroll-behavior: smooth;
+    }
+    
+    /* Scrollbar styling */
+    .console-body::-webkit-scrollbar {
+        width: 8px;
+    }
+    .console-body::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.1);
+    }
+    .console-body::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+    }
+    .console-body::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+    
+    .checkbox-container {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        cursor: pointer;
+    }
+    
+    .checkbox-container input {
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="animate-fade-in">
+    <div class="logs-header">
+        <div class="logs-title">
+            <i class="fa-solid fa-terminal" style="color: var(--primary);"></i>
+            System Operations Logs
+        </div>
+        <div class="logs-actions">
+            <label class="checkbox-container">
+                <input type="checkbox" id="autoscroll-toggle" checked>
+                Auto-scroll to bottom
+            </label>
+            <button class="btn btn-secondary btn-sm" hx-get="/logs/content" hx-target="#logs-container" hx-swap="innerHTML">
+                <i class="fa-solid fa-arrows-rotate"></i> Refresh
+            </button>
+        </div>
+    </div>
+    
+    <div class="console-wrapper">
+        <div class="console-header">
+            <div class="console-dots">
+                <div class="console-dot red"></div>
+                <div class="console-dot yellow"></div>
+                <div class="console-dot green"></div>
+            </div>
+            <div class="console-meta">founderscrew.log — tail -n 200</div>
+        </div>
+        
+        <div id="logs-container" 
+             hx-get="/logs/content" 
+             hx-trigger="load, every 5s" 
+             hx-swap="innerHTML"
+             class="console-body">
+            <div style="color: var(--text-muted); font-family: monospace;">Initializing real-time log connection...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Keep track of scroll height and perform auto-scrolling
+    const container = document.getElementById('logs-container');
+    const autoScrollToggle = document.getElementById('autoscroll-toggle');
+    
+    // MutationObserver to scroll to bottom when log content updates
+    const observer = new MutationObserver(() => {
+        if (autoScrollToggle.checked) {
+            container.scrollTop = container.scrollHeight;
+        }
+    });
+    
+    observer.observe(container, { childList: true, subtree: true });
+</script>
+{% endblock %}

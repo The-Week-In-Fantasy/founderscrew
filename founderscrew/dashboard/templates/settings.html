@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — Founders.crew{% endblock %}
+
+{% block extra_head %}
+<style>
+    .settings-container {
+        max-width: 800px;
+        margin: 0 auto;
+    }
+
+    .form-group {
+        margin-bottom: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    label {
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+
+    .form-control {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border-color);
+        color: var(--text-main);
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        font-family: inherit;
+        font-size: 0.95rem;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        width: 100%;
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    }
+
+    select.form-control {
+        cursor: pointer;
+    }
+
+    select.form-control option {
+        background-color: #0f172a;
+        color: #f8fafc;
+    }
+
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+    }
+
+    @media (max-width: 600px) {
+        .form-row {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .alert {
+        padding: 1rem 1.5rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-weight: 500;
+    }
+
+    .alert-success {
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        color: var(--success);
+    }
+
+    .help-text {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="settings-container">
+    <div style="margin-bottom: 2rem;">
+        <h1 style="font-size: 2rem; font-weight: 800;"><i class="fa-solid fa-sliders" style="color: var(--primary);"></i> Configuration Settings</h1>
+        <p style="color: var(--text-muted); margin-top: 0.25rem;">Configure your target repository, coding tools and AI models</p>
+    </div>
+
+    {% if message %}
+    <div class="alert alert-success animate-fade-in">
+        <i class="fa-solid fa-circle-check"></i>
+        <span>{{ message }}</span>
+    </div>
+    {% endif %}
+
+    <form action="/settings" method="POST" class="card">
+        <!-- Section: GitHub Connection -->
+        <h3 style="margin-bottom: 1.25rem; font-weight: 700; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+            <i class="fa-brands fa-github"></i> 1. GitHub Connection
+        </h3>
+        
+        <div class="form-group">
+            <label for="repo">Target Repository</label>
+            <input type="text" id="repo" name="repo" class="form-control" placeholder="owner/repo (e.g. octocat/hello-world)" value="{{ config.github.repository }}" required>
+            <span class="help-text">The GitHub repository where the virtual crew will triage issues.</span>
+        </div>
+
+        <div class="form-group">
+            <label for="trigger_label">Trigger Label</label>
+            <input type="text" id="trigger_label" name="trigger_label" class="form-control" placeholder="crew:ready" value="{{ config.github.trigger_label }}" required>
+            <span class="help-text">Label that triggers the virtual crew to begin triaging and planning.</span>
+        </div>
+
+        <div class="form-group">
+            <label for="base_branch">Baseline Branch</label>
+            <input type="text" id="base_branch" name="base_branch" class="form-control" placeholder="main (or qa, staging, etc)" value="{{ config.github.base_branch | default('main') }}" required>
+            <span class="help-text">The default branch to clone locally and open Pull Requests against.</span>
+        </div>
+
+        <!-- Section: Coding Tools Configuration -->
+        <h3 style="margin: 2rem 0 1.25rem; font-weight: 700; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+            <i class="fa-solid fa-screwdriver-wrench"></i> 2. Coding Tools & Orchestration
+        </h3>
+        
+        <div class="form-row" style="grid-template-columns: 1fr 1fr 1fr;">
+            <div class="form-group">
+                <label for="coding_tier1">Coding Tool Tier 1 (Primary)</label>
+                <select id="coding_tier1" name="coding_tier1" class="form-control">
+                    <option value="claude" {% if config.coding_tools.tier1 == 'claude' or config.coding_tools.preferred == 'claude' %}selected{% endif %}>Claude CLI (Claude Code)</option>
+                    <option value="cursor" {% if config.coding_tools.tier1 == 'cursor' or config.coding_tools.preferred == 'cursor' %}selected{% endif %}>Cursor CLI</option>
+                    <option value="gemini" {% if config.coding_tools.tier1 == 'gemini' or config.coding_tools.preferred == 'gemini' %}selected{% endif %}>Gemini CLI</option>
+                    <option value="codex" {% if config.coding_tools.tier1 == 'codex' or config.coding_tools.preferred == 'codex' %}selected{% endif %}>Codex CLI</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="coding_tier2">Coding Tool Tier 2 (Secondary)</label>
+                <select id="coding_tier2" name="coding_tier2" class="form-control">
+                    <option value="cursor" {% if config.coding_tools.tier2 == 'cursor' or config.coding_tools.fallback == 'cursor' %}selected{% endif %}>Cursor CLI</option>
+                    <option value="claude" {% if config.coding_tools.tier2 == 'claude' or config.coding_tools.fallback == 'claude' %}selected{% endif %}>Claude CLI (Claude Code)</option>
+                    <option value="gemini" {% if config.coding_tools.tier2 == 'gemini' or config.coding_tools.fallback == 'gemini' %}selected{% endif %}>Gemini CLI</option>
+                    <option value="codex" {% if config.coding_tools.tier2 == 'codex' or config.coding_tools.fallback == 'codex' %}selected{% endif %}>Codex CLI</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="coding_tier3">Coding Tool Tier 3 (Tertiary)</label>
+                <select id="coding_tier3" name="coding_tier3" class="form-control">
+                    <option value="gemini" {% if config.coding_tools.tier3 == 'gemini' or config.coding_tools.fallback == 'gemini' %}selected{% endif %}>Gemini CLI</option>
+                    <option value="claude" {% if config.coding_tools.tier3 == 'claude' %}selected{% endif %}>Claude CLI (Claude Code)</option>
+                    <option value="cursor" {% if config.coding_tools.tier3 == 'cursor' %}selected{% endif %}>Cursor CLI</option>
+                    <option value="codex" {% if config.coding_tools.tier3 == 'codex' %}selected{% endif %}>Codex CLI</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="mode">Execution Mode</label>
+            <select id="mode" name="mode" class="form-control">
+                <option value="cli" {% if config.coding_tools.mode == 'cli' %}selected{% endif %}>CLI Mode (Local Subprocesses - CLI installed required)</option>
+                <option value="api" {% if config.coding_tools.mode == 'api' %}selected{% endif %}>API Mode (Serverless direct LLM calls - Cloud Run ready)</option>
+            </select>
+            <span class="help-text">Use API Mode for cloud deployments (like Google Cloud Run) to avoid installing heavy local CLI programs in containers.</span>
+        </div>
+
+        <!-- Section: AI Models -->
+        <h3 style="margin: 2rem 0 1.25rem; font-weight: 700; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+            <i class="fa-solid fa-brain"></i> 3. Agent AI Models
+        </h3>
+
+        <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+            <!-- Fast Model Tiers (Triage, Tester, QA, Deployer) -->
+            <div>
+                <h4 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--text-muted);">Fast Agent Model Tiers (Triage, Tester, QA, Deployer)</h4>
+                <div class="form-row" style="grid-template-columns: 1fr 1fr 1fr;">
+                    <div class="form-group">
+                        <label for="fast_tier1">Fast Tier 1 (Primary)</label>
+                        <select id="fast_tier1" name="fast_tier1" class="form-control">
+                            <option value="gemini/gemini-2.5-flash" {% if config.agents.fast_tier1 == 'gemini/gemini-2.5-flash' or config.agents.fast_model == 'gemini/gemini-2.5-flash' or config.agents.fast_model == 'gemini-2.5-flash' %}selected{% endif %}>gemini-2.5-flash</option>
+                            <option value="gemini/gemini-2.5-pro" {% if config.agents.fast_tier1 == 'gemini/gemini-2.5-pro' or config.agents.fast_model == 'gemini/gemini-2.5-pro' or config.agents.fast_model == 'gemini-2.5-pro' %}selected{% endif %}>gemini-2.5-pro</option>
+                            <option value="openai/gpt-4o-mini" {% if config.agents.fast_tier1 == 'openai/gpt-4o-mini' %}selected{% endif %}>gpt-4o-mini</option>
+                            <option value="anthropic/claude-3-haiku" {% if config.agents.fast_tier1 == 'anthropic/claude-3-haiku' %}selected{% endif %}>claude-3-haiku</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="fast_tier2">Fast Tier 2 (Secondary)</label>
+                        <select id="fast_tier2" name="fast_tier2" class="form-control">
+                            <option value="gemini/gemini-2.5-pro" {% if config.agents.fast_tier2 == 'gemini/gemini-2.5-pro' %}selected{% endif %}>gemini-2.5-pro</option>
+                            <option value="gemini/gemini-2.5-flash" {% if config.agents.fast_tier2 == 'gemini/gemini-2.5-flash' or not config.agents.fast_tier2 %}selected{% endif %}>gemini-2.5-flash</option>
+                            <option value="openai/gpt-4o-mini" {% if config.agents.fast_tier2 == 'openai/gpt-4o-mini' %}selected{% endif %}>gpt-4o-mini</option>
+                            <option value="anthropic/claude-3-haiku" {% if config.agents.fast_tier2 == 'anthropic/claude-3-haiku' %}selected{% endif %}>claude-3-haiku</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="fast_tier3">Fast Tier 3 (Tertiary)</label>
+                        <select id="fast_tier3" name="fast_tier3" class="form-control">
+                            <option value="openai/gpt-4o-mini" {% if config.agents.fast_tier3 == 'openai/gpt-4o-mini' or not config.agents.fast_tier3 %}selected{% endif %}>gpt-4o-mini</option>
+                            <option value="gemini/gemini-2.5-flash" {% if config.agents.fast_tier3 == 'gemini/gemini-2.5-flash' %}selected{% endif %}>gemini-2.5-flash</option>
+                            <option value="gemini/gemini-2.5-pro" {% if config.agents.fast_tier3 == 'gemini/gemini-2.5-pro' %}selected{% endif %}>gemini-2.5-pro</option>
+                            <option value="anthropic/claude-3-haiku" {% if config.agents.fast_tier3 == 'anthropic/claude-3-haiku' %}selected{% endif %}>claude-3-haiku</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Planning Model Tiers (Planner, Builder, Reviewer) -->
+            <div>
+                <h4 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--text-muted);">Planning Agent Model Tiers (Planner, Builder, Reviewer)</h4>
+                <div class="form-row" style="grid-template-columns: 1fr 1fr 1fr;">
+                    <div class="form-group">
+                        <label for="planning_tier1">Planning Tier 1 (Primary)</label>
+                        <select id="planning_tier1" name="planning_tier1" class="form-control">
+                            <option value="gemini/gemini-2.5-pro" {% if config.agents.planning_tier1 == 'gemini/gemini-2.5-pro' or config.agents.planning_model == 'gemini/gemini-2.5-pro' or config.agents.planning_model == 'gemini-2.5-pro' %}selected{% endif %}>gemini-2.5-pro</option>
+                            <option value="openai/gpt-4o" {% if config.agents.planning_tier1 == 'openai/gpt-4o' %}selected{% endif %}>gpt-4o</option>
+                            <option value="anthropic/claude-3-5-sonnet" {% if config.agents.planning_tier1 == 'anthropic/claude-3-5-sonnet' %}selected{% endif %}>claude-3-5-sonnet</option>
+                            <option value="gemini/gemini-2.5-flash" {% if config.agents.planning_tier1 == 'gemini/gemini-2.5-flash' %}selected{% endif %}>gemini-2.5-flash</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="planning_tier2">Planning Tier 2 (Secondary)</label>
+                        <select id="planning_tier2" name="planning_tier2" class="form-control">
+                            <option value="openai/gpt-4o" {% if config.agents.planning_tier2 == 'openai/gpt-4o' %}selected{% endif %}>gpt-4o</option>
+                            <option value="gemini/gemini-2.5-pro" {% if config.agents.planning_tier2 == 'gemini/gemini-2.5-pro' or not config.agents.planning_tier2 %}selected{% endif %}>gemini-2.5-pro</option>
+                            <option value="anthropic/claude-3-5-sonnet" {% if config.agents.planning_tier2 == 'anthropic/claude-3-5-sonnet' %}selected{% endif %}>claude-3-5-sonnet</option>
+                            <option value="gemini/gemini-2.5-flash" {% if config.agents.planning_tier2 == 'gemini/gemini-2.5-flash' %}selected{% endif %}>gemini-2.5-flash</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="planning_tier3">Planning Tier 3 (Tertiary)</label>
+                        <select id="planning_tier3" name="planning_tier3" class="form-control">
+                            <option value="anthropic/claude-3-5-sonnet" {% if config.agents.planning_tier3 == 'anthropic/claude-3-5-sonnet' or not config.agents.planning_tier3 %}selected{% endif %}>claude-3-5-sonnet</option>
+                            <option value="gemini/gemini-2.5-pro" {% if config.agents.planning_tier3 == 'gemini/gemini-2.5-pro' %}selected{% endif %}>gemini-2.5-pro</option>
+                            <option value="openai/gpt-4o" {% if config.agents.planning_tier3 == 'openai/gpt-4o' %}selected{% endif %}>gpt-4o</option>
+                            <option value="gemini/gemini-2.5-flash" {% if config.agents.planning_tier3 == 'gemini/gemini-2.5-flash' %}selected{% endif %}>gemini-2.5-flash</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 2rem; display: flex; justify-content: flex-end; gap: 1rem;">
+            <a href="/" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn"><i class="fa-solid fa-floppy-disk"></i> Save Configuration</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
