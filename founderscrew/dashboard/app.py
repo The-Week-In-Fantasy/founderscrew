@@ -225,10 +225,12 @@ async def get_logs_content():
 @app.get("/env", response_class=HTMLResponse, dependencies=[Depends(auth_required)])
 async def get_env(request: Request):
     """Renders the environment variables manager."""
+    env_vars = settings.get("workspace_env", {})
+    masked_env = {k: "********" for k in env_vars.keys()}
     return templates.TemplateResponse(
         request,
         "env.html",
-        {"env_vars": settings.get("workspace_env", {})}
+        {"env_vars": masked_env}
     )
 
 @app.post("/env", response_class=HTMLResponse, dependencies=[Depends(auth_required)])
@@ -238,19 +240,24 @@ async def post_env(request: Request):
     keys = form.getlist("env_keys")
     values = form.getlist("env_values")
     
+    old_env = settings.get("workspace_env", {})
     new_env = {}
     for k, v in zip(keys, values):
         k = k.strip()
         if k:
-            new_env[k] = v
+            if v == "********" and k in old_env:
+                new_env[k] = old_env[k]
+            else:
+                new_env[k] = v
             
     settings.set("workspace_env", new_env)
     settings.save()
     
+    masked_env = {k: "********" for k in new_env.keys()}
     return templates.TemplateResponse(
         request,
         "env.html",
-        {"env_vars": new_env, "message": "Environment variables securely saved."}
+        {"env_vars": masked_env, "message": "Environment variables securely saved."}
     )
 
 @app.get("/settings", response_class=HTMLResponse, dependencies=[Depends(auth_required)])
