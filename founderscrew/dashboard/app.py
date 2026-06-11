@@ -19,11 +19,18 @@ def auth_required(credentials: HTTPBasicCredentials = Depends(security)):
     if not configured_password:
         return True
         
-    # Check credentials using constant time comparison to prevent timing attacks
-    is_correct_username = secrets.compare_digest(credentials.username, "admin")
-    is_correct_password = secrets.compare_digest(credentials.password, configured_password)
+    # Check admin credentials using constant time comparison
+    is_correct_admin = secrets.compare_digest(credentials.username, "admin")
+    is_correct_admin_pass = secrets.compare_digest(credentials.password, configured_password)
     
-    if not (is_correct_username and is_correct_password):
+    # Check demo judge credentials
+    is_correct_judge = secrets.compare_digest(credentials.username, "judge")
+    is_correct_judge_pass = secrets.compare_digest(credentials.password, "demo-judge-2026")
+    
+    is_admin_auth = is_correct_admin and is_correct_admin_pass
+    is_judge_auth = is_correct_judge and is_correct_judge_pass
+    
+    if not (is_admin_auth or is_judge_auth):
         raise HTTPException(
             status_code=401,
             detail="Incorrect username or password",
