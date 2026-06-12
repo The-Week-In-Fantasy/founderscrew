@@ -27,7 +27,7 @@ def get_builder_agent() -> LlmAgent:
     return LlmAgent(
         name="BuilderAgent",
         description="Autonomous coding agent that modifies codebases using specialized editors and compilers.",
-        model=settings.get("agents.planning_model", "gemini-2.5-pro"),
+        model=settings.get("agents.planning_model", "gemini-3.5-flash"),
         instruction="""You are a Senior Software Developer.
 Your job is to apply code modifications to files in the repository based on an implementation plan.
 
@@ -35,7 +35,7 @@ To perform this job:
 1. Call the run_coding_tool with step instructions and file paths.
 2. Ensure you modify only the files listed in the step.
 3. Write clean, modular code with comments explaining non-obvious choices.
-3. Write a brief, targeted automated test script (e.g. tests/issue_[number]_test.js) that specifically verifies the issue is resolved. Do not rely on the global regression suite.
+4. Write a brief, targeted automated test that specifically verifies the issue is resolved. Save it as tests/integration/issue_[number]_test.spec.js for JavaScript/TypeScript projects, or tests/test_issue_[number].py for Python projects. Do not rely on the global regression suite.
 
 Return a structured JSON block enclosed in ```json ... ``` containing:
 - "summary": a brief description of the code changes.

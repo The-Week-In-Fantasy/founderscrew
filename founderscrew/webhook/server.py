@@ -1,3 +1,7 @@
+import os
+import hmac
+import json
+import hashlib
 import asyncio
 import logging
 from typing import Dict, Any
@@ -28,8 +32,26 @@ async def github_webhook(
     """GitHub webhook receiver endpoint. Processes issue labeling and commenting."""
     if not x_github_event:
         raise HTTPException(status_code=400, detail="Missing X-GitHub-Event header")
-        
-    payload = await request.json()
+
+    body = await request.body()
+
+    # Verify the GitHub HMAC signature when a webhook secret is configured.
+    # Without this, anyone who discovers the public URL could forge approval
+    # comments and trigger builds/deployments.
+    secret = os.getenv("GITHUB_WEBHOOK_SECRET") or settings.get("github.webhook_secret")
+    if secret:
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        expected = "sha256=" + hmac.new(str(secret).encode(), body, hashlib.sha256).hexdigest()
+        if not signature or not hmac.compare_digest(signature, expected):
+            logger.warning("Rejected webhook delivery with missing/invalid X-Hub-Signature-256.")
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    else:
+        logger.warning("GITHUB_WEBHOOK_SECRET is not configured; webhook deliveries are NOT verified.")
+
+    try:
+        payload = json.loads(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
     
     # 1. Handle issue labeled (trigger crew:ready)
     if x_github_event == "issues":

@@ -5,7 +5,8 @@ from founderscrew.tools import (
     github_commit_files,
     github_create_pr,
     github_add_comment,
-    github_merge_pr
+    github_merge_pr,
+    github_push_workspace
 )
 from founderscrew.config import settings
 
@@ -14,16 +15,16 @@ def get_deployer_agent() -> LlmAgent:
     return LlmAgent(
         name="DeployerAgent",
         description="Autonomous deployment agent that opens pull requests, commits code, and merges PRs.",
-        model=settings.get("agents.fast_model", "gemini-2.5-flash"),
+        model=settings.get("agents.fast_model", "gemini-3.1-flash-lite"),
         instruction="""You are a Release Engineer.
 Your job is to manage the release flow: create branches, commit final code, create pull requests, post status comments, and merge PRs.
 
 To perform this job:
-1. Create a branch using github_create_branch if a branch name is provided.
-2. Commit files to that branch using github_commit_files.
-3. Open a Pull Request using github_create_pr with a clear summary of changes, planning steps, test results, and QA observations.
-4. Add status comments to the issue using github_add_comment.
-5. Merge the PR using github_merge_pr if approvals are signed off.
+1. Push the local workspace code changes using github_push_workspace with the provided branch_name. This commits the Builder's local edits and pushes them to GitHub (the branch is created automatically).
+2. Open a Pull Request using github_create_pr with a clear summary of changes, planning steps, test results, and QA observations.
+3. Add status comments to the issue using github_add_comment.
+4. Merge the PR using github_merge_pr if approvals are signed off.
+Only use github_create_branch and github_commit_files for small additional file tweaks that are not already in the local workspace.
 
 Return a structured markdown JSON block containing:
 - success: boolean
@@ -33,6 +34,7 @@ Return a structured markdown JSON block containing:
 - action_taken: description of actions performed
 """,
         tools=[
+            FunctionTool(github_push_workspace),
             FunctionTool(github_create_branch),
             FunctionTool(github_commit_files),
             FunctionTool(github_create_pr),

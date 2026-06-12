@@ -8,7 +8,7 @@ def get_triage_agent() -> LlmAgent:
     return LlmAgent(
         name="TriageAgent",
         description="Autonomous triage agent that categorizes issues and gathers repository context.",
-        model=settings.get("agents.fast_model", "gemini-2.5-flash"),
+        model=settings.get("agents.fast_model", "gemini-3.1-flash-lite"),
         instruction="""You are a senior DevOps triage engineer.
 Your job is to read a GitHub issue, classify it, identify affected files, and estimate complexity.
 

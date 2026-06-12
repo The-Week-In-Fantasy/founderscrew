@@ -395,7 +395,19 @@
                 </div>
                 
                 <p style="line-height: 1.6; margin-bottom: 1rem;">{{ state.qa_report.summary }}</p>
-                
+
+                {% if state.qa_report.screenshots %}
+                <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                    {% for shot in state.qa_report.screenshots %}
+                    {% set shot_name = shot.replace('\\', '/').split('/')[-1] %}
+                    <a href="/screenshots/{{ shot_name }}" target="_blank" title="Open full-size screenshot">
+                        <img src="/screenshots/{{ shot_name }}" alt="QA screenshot"
+                             style="max-width: 480px; width: 100%; border: 1px solid var(--border, #334155); border-radius: 8px;">
+                    </a>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
                 {% if not state.qa_report.approved and active_status == 'await_qa_approval' %}
                 <div class="approval-banner">
                     <div class="approval-text">

@@ -79,10 +79,24 @@ async def test_handle_comment_created_approval(temp_db_path):
         
         # Mock github and build-test runner
         with patch("founderscrew.orchestrator.github_add_comment") as mock_comment, \
+             patch("founderscrew.orchestrator.github_get_bot_login", return_value="founders-crew-bot"), \
              patch.object(orch, "run_build_test_review_flow", new_callable=AsyncMock) as mock_flow:
-                 
-            await orch.handle_comment_created("o/r", 100, "Approve this plan please", "founder")
-            
+
+            # The bot's own comment (containing the keyword) must never approve
+            await orch.handle_comment_created("o/r", 100, "Please reply with approve or lgtm", "founders-crew-bot")
+            assert orch.store.load_state("o_r_100").status == WorkflowStatus.AWAIT_PLAN_APPROVAL
+
+            # A comment merely mentioning approval must not approve
+            await orch.handle_comment_created("o/r", 100, "I don't approve of this yet", "c")
+            assert orch.store.load_state("o_r_100").status == WorkflowStatus.AWAIT_PLAN_APPROVAL
+
+            # An unauthorized commenter must not approve
+            await orch.handle_comment_created("o/r", 100, "approve", "random-stranger")
+            assert orch.store.load_state("o_r_100").status == WorkflowStatus.AWAIT_PLAN_APPROVAL
+
+            # The issue creator leading with the keyword approves
+            await orch.handle_comment_created("o/r", 100, "Approve - this plan looks good", "c")
+
             # Verify status transitioned to BUILDING
             updated_state = orch.store.load_state("o_r_100")
             assert updated_state.status == WorkflowStatus.BUILDING
@@ -90,6 +104,59 @@ async def test_handle_comment_created_approval(temp_db_path):
             mock_comment.assert_called_once()
             mock_flow.assert_called_once()
 
+
+@pytest.mark.anyio
+async def test_build_test_self_heal_loop(temp_db_path):
+    """A failing test run is fed back to the Builder, then re-tested to green."""
+    orch = Orchestrator()
+
+    with patch("founderscrew.config.settings.get", return_value=temp_db_path):
+        orch.store._init_sqlite()
+
+        from founderscrew.state.models import ImplementationPlanModel
+        issue = IssueContext(number=7, title="Fix widget", creator="c", repository="o/r", affected_files=["a.js"])
+        state = WorkflowStateModel(
+            session_id="o_r_7",
+            issue=issue,
+            status=WorkflowStatus.TESTING,
+            plan=ImplementationPlanModel(summary="Fix the widget", steps=[]),
+            branch_name="founderscrew/fix-issue-7"
+        )
+        orch.store.save_state(state)
+
+        with patch("founderscrew.orchestrator.github_add_comment"), \
+             patch("founderscrew.orchestrator.github_clone_or_pull", return_value=str(temp_db_path.parent)), \
+             patch("founderscrew.orchestrator.github_push_workspace", return_value={"success": True}), \
+             patch("founderscrew.orchestrator.set_active_workspace_branch"), \
+             patch("founderscrew.orchestrator.capture_screenshot", return_value=True), \
+             patch("founderscrew.orchestrator.get_repo_memory", return_value={"profile": None, "lessons": []}), \
+             patch("founderscrew.orchestrator.add_repo_lesson") as mock_lesson, \
+             patch.object(orch, "_run_agent") as mock_run_agent:
+
+            mock_run_agent.side_effect = [
+                '{"passed": false, "output": "1 test failed: widget is broken"}',   # tester: red
+                '{"summary": "fixed widget", "test_command": "npm test"}',          # builder: fix pass
+                '{"passed": true, "output": "all tests passed"}',                   # tester: green
+                '{"passed": true, "recommendations": [], "auto_fixable": []}',      # reviewer
+                '{"passed": true, "similarity_percentage": 100.0, "observations": "renders fine"}',  # qa
+            ]
+
+            await orch.run_build_test_review_flow(state, start_at="testing")
+
+            final = orch.store.load_state("o_r_7")
+            assert final.status == WorkflowStatus.AWAIT_QA_APPROVAL
+            assert final.test_results.passed is True
+            assert final.test_command == "npm test"
+            assert mock_run_agent.call_count == 5
+            # QA screenshot is recorded on the report for the dashboard
+            assert final.qa_report is not None
+            assert len(final.qa_report.screenshots) == 1
+            assert final.qa_report.screenshots[0].endswith("o_r_7_qa.png")
+            # The self-heal was recorded as an episodic repo lesson
+            mock_lesson.assert_called_once()
+            lesson = mock_lesson.call_args[0][2]
+            assert lesson["issue"] == 7
+            assert "self-healed" in lesson["summary"]
 
 @pytest.mark.anyio
 async def test_resume_failed_workflow(temp_db_path):

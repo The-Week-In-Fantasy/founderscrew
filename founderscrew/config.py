@@ -29,15 +29,19 @@ DEFAULT_CONFIG = {
         "tier3": "gemini",
     },
     "agents": {
-        "planning_model": "gemini-2.5-pro",
-        "fast_model": "gemini-2.5-flash",
+        "planning_model": "gemini-3.5-flash",
+        "fast_model": "gemini-3.1-flash-lite",
         "max_retries": 2,
-        "fast_tier1": "gemini-2.5-flash",
-        "fast_tier2": "gemini-2.5-pro",
-        "fast_tier3": "openai/gpt-4o-mini",
-        "planning_tier1": "gemini-2.5-pro",
-        "planning_tier2": "gemini-2.5-flash",
-        "planning_tier3": "anthropic/claude-3-5-sonnet",
+        # GA models only in defaults; preview models are offered in the
+        # dashboard dropdowns but never defaulted (Google shuts previews down).
+        # vertex_ai/ tiers are partner models billed to the GCP project; they
+        # are skipped automatically when GOOGLE_CLOUD_PROJECT is not configured.
+        "fast_tier1": "gemini/gemini-3.1-flash-lite",
+        "fast_tier2": "gemini/gemini-3-flash",
+        "fast_tier3": "vertex_ai/xai/grok-4.1-fast-reasoning",
+        "planning_tier1": "gemini/gemini-3.5-flash",
+        "planning_tier2": "vertex_ai/claude-sonnet-4-6",
+        "planning_tier3": "gemini/gemini-2.5-pro",
     },
     "dashboard": {
         "port": 8080,
@@ -94,7 +98,9 @@ class Config:
         
         # Google API keys / gcloud project (merge env variables or keyring values without overwriting loaded values)
         if "google" not in cfg:
-            cfg["google"] = {"api_key": "", "project_id": ""}
+            cfg["google"] = {"api_key": "", "project_id": "", "vertex_location": "global"}
+        if os.getenv("VERTEXAI_LOCATION"):
+            cfg["google"]["vertex_location"] = os.getenv("VERTEXAI_LOCATION")
             
         google_key = os.getenv("GOOGLE_API_KEY")
         if not google_key:
@@ -131,6 +137,15 @@ class Config:
                 pass
         if anthropic_key:
             cfg["coding_tools"]["anthropic_api_key"] = anthropic_key
+
+        xai_key = os.getenv("XAI_API_KEY")
+        if not xai_key:
+            try:
+                xai_key = keyring.get_password("founderscrew", "xai_api_key")
+            except Exception:
+                pass
+        if xai_key:
+            cfg["coding_tools"]["xai_api_key"] = xai_key
         
         # Discord webhook env override
         discord_webhook = os.getenv("DISCORD_WEBHOOK_URL")
@@ -215,6 +230,16 @@ class Config:
                 if "coding_tools" not in save_cfg:
                     save_cfg["coding_tools"] = {}
                 save_cfg["coding_tools"]["anthropic_api_key"] = anthropic_key
+
+        # Save xAI api key to keyring
+        xai_key = save_cfg.get("coding_tools", {}).pop("xai_api_key", None)
+        if xai_key:
+            try:
+                keyring.set_password("founderscrew", "xai_api_key", xai_key)
+            except Exception:
+                if "coding_tools" not in save_cfg:
+                    save_cfg["coding_tools"] = {}
+                save_cfg["coding_tools"]["xai_api_key"] = xai_key
 
         # Save workspace env to keyring securely
         workspace_env = save_cfg.pop("workspace_env", None)

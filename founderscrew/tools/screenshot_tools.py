@@ -6,11 +6,19 @@ from PIL import Image, ImageDraw, ImageFont, ImageChops
 
 logger = logging.getLogger("founderscrew.screenshot_tools")
 
-def capture_screenshot(url: str, output_path: str) -> bool:
-    """Captures a screenshot of a webpage. Falls back to generating a beautiful mock browser screenshot if Playwright is unavailable."""
+def capture_screenshot(url: str, output_path: str, allow_mock: bool = True) -> bool:
+    """Captures a screenshot of a webpage.
+
+    Args:
+        url: The page URL to capture.
+        output_path: Where to save the PNG.
+        allow_mock: When True, falls back to a generated mock browser image if
+            Playwright is unavailable. Pass False when the screenshot is used
+            for real verification — a mock must never pass as evidence.
+    """
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    
+
     try:
         # Try to use playwright if installed
         from playwright.sync_api import sync_playwright
@@ -26,6 +34,9 @@ def capture_screenshot(url: str, output_path: str) -> bool:
             logger.info(f"Screenshot saved to {output_path} using Playwright.")
             return True
     except Exception as e:
+        if not allow_mock:
+            logger.warning(f"Playwright screenshot of {url} failed: {e}. No mock fallback allowed.")
+            return False
         logger.warning(f"Playwright screenshot failed or unavailable: {e}. Generating mockup fallback.")
         return generate_mock_browser_screenshot(url, str(output_file))
 

@@ -69,3 +69,7 @@ class WorkflowStateModel(BaseModel):
     pr_number: Optional[int] = None
     pr_url: Optional[str] = None
     error_message: Optional[str] = None
+    # Stage identifier ("triage", "planning", "building", "testing", "qa",
+    # "deploy") recorded when status becomes FAILED, so retries resume at the
+    # right stage without parsing error message text
+    failed_stage: Optional[str] = None

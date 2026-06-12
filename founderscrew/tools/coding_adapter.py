@@ -98,27 +98,17 @@ class CodingToolAdapter:
     def _execute_api(self, instruction: str, files: List[str], workdir: str) -> Dict[str, Any]:
         """Runs the task using direct API calls (via LiteLLM) to edit files, trying planning tiers if needed."""
         # Resolve planning model tiers
-        tier1 = settings.get("agents.planning_tier1", settings.get("agents.planning_model", "gemini/gemini-2.5-pro"))
+        tier1 = settings.get("agents.planning_tier1", settings.get("agents.planning_model", "gemini/gemini-3.5-flash"))
         tier2 = settings.get("agents.planning_tier2", None)
         tier3 = settings.get("agents.planning_tier3", None)
-        
+
         api_tiers = [t for t in [tier1, tier2, tier3] if t]
         if not api_tiers:
-            api_tiers = ["gemini/gemini-2.5-pro"]
+            api_tiers = ["gemini/gemini-3.5-flash"]
             
-        valid_api_tiers = []
-        for model in api_tiers:
-            if "openai" in model.lower() and not (settings.get("coding_tools.openai_api_key") or os.environ.get("OPENAI_API_KEY")):
-                logger.info(f"Skipping API model {model} because OPENAI_API_KEY is not set.")
-                continue
-            if ("anthropic" in model.lower() or "claude" in model.lower()) and not (settings.get("coding_tools.anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")):
-                logger.info(f"Skipping API model {model} because ANTHROPIC_API_KEY is not set.")
-                continue
-            if "gemini" in model.lower() and not (settings.get("google.api_key") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")):
-                logger.info(f"Skipping API model {model} because GOOGLE_API_KEY is not set.")
-                continue
-            valid_api_tiers.append(model)
-            
+        from founderscrew.tools.model_routing import filter_available_tiers
+        valid_api_tiers = filter_available_tiers(api_tiers)
+
         if not valid_api_tiers:
             raise RuntimeError("All configured API coding tools were skipped because their required API keys are missing.")
             
@@ -171,20 +161,10 @@ Do not output diffs. Output the full complete file content for each file you edi
                     {"role": "user", "content": prompt}
                 ]
 
-                # Call the LLM (handling API keys via environment variables)
-                g_key = settings.get("google.api_key")
-                if g_key:
-                    os.environ["GOOGLE_API_KEY"] = g_key
-                    os.environ["GEMINI_API_KEY"] = g_key
-                    
-                openai_key = settings.get("coding_tools.openai_api_key")
-                if openai_key:
-                    os.environ["OPENAI_API_KEY"] = openai_key
-                    
-                anthropic_key = settings.get("coding_tools.anthropic_api_key")
-                if anthropic_key:
-                    os.environ["ANTHROPIC_API_KEY"] = anthropic_key
-                    
+                # Call the LLM (credentials resolved via environment variables)
+                from founderscrew.tools.model_routing import apply_provider_env
+                apply_provider_env()
+
                 response = litellm.completion(
                     model=model,
                     messages=messages,

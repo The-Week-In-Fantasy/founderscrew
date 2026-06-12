@@ -8,7 +8,8 @@ from founderscrew.tools.github_tools import (
     github_create_pr,
     github_add_comment,
     github_merge_pr,
-    github_clone_or_pull
+    github_clone_or_pull,
+    github_push_workspace
 )
 from founderscrew.tools.coding_adapter import CodingToolAdapter
 from founderscrew.tools.shell_tools import run_safe_shell_command
@@ -27,6 +28,7 @@ __all__ = [
     "github_add_comment",
     "github_merge_pr",
     "github_clone_or_pull",
+    "github_push_workspace",
     "CodingToolAdapter",
     "run_safe_shell_command",
     "capture_screenshot",

@@ -95,10 +95,20 @@ async def agent_card():
                 "observations": {"type": "string"}
             }
         },
-        "models": ["gemini-2.5-flash", "gemini-2.5-pro"],
+        "models": ["gemini-3.1-flash-lite", "gemini-3.5-flash"],
         "runtime": "Google Cloud Run",
         "framework": "Google Agent Development Kit (ADK)"
     }
+
+@app.get("/screenshots/{filename}", dependencies=[Depends(auth_required)])
+async def get_screenshot(filename: str):
+    """Serves QA screenshots captured during workflow runs."""
+    from fastapi.responses import FileResponse
+    shots_dir = Path.home() / ".founderscrew" / "screenshots"
+    file_path = shots_dir / Path(filename).name  # strip any path components
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return FileResponse(str(file_path), media_type="image/png")
 
 @app.get("/", response_class=HTMLResponse, dependencies=[Depends(auth_required)])
 async def home(request: Request):
@@ -308,13 +318,13 @@ async def post_settings(
     t2 = coding_tier2 or fallback_tool or "cursor"
     t3 = coding_tier3 or "gemini"
     
-    f1 = fast_tier1 or fast_model or "gemini-2.5-flash"
-    f2 = fast_tier2 or "gemini-2.5-pro"
-    f3 = fast_tier3 or "openai/gpt-4o-mini"
+    f1 = fast_tier1 or fast_model or "gemini/gemini-3.1-flash-lite"
+    f2 = fast_tier2 or "gemini/gemini-3-flash"
+    f3 = fast_tier3 or "vertex_ai/xai/grok-4.1-fast-reasoning"
     
-    p1 = planning_tier1 or planning_model or "gemini-2.5-pro"
-    p2 = planning_tier2 or "gemini-2.5-flash"
-    p3 = planning_tier3 or "anthropic/claude-3-5-sonnet"
+    p1 = planning_tier1 or planning_model or "gemini/gemini-3.5-flash"
+    p2 = planning_tier2 or "vertex_ai/claude-sonnet-4-6"
+    p3 = planning_tier3 or "gemini/gemini-2.5-pro"
     
     settings.set("github.repository", repo)
     settings.set("github.trigger_label", trigger_label)

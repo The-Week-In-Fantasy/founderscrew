@@ -37,6 +37,15 @@ class StateStore:
             )
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS repo_memory (
+                repo_name TEXT PRIMARY KEY,
+                record_json TEXT,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         conn.commit()
         conn.close()
 
@@ -135,6 +144,54 @@ class StateStore:
         rows = cursor.fetchall()
         conn.close()
         return [WorkflowStateModel.model_validate_json(row[0]) for row in rows]
+
+    def save_repo_memory(self, repo_name: str, record: dict) -> None:
+        """Saves a repository's memory record (profile + lessons) to the active backend."""
+        if self.backend == "firestore":
+            try:
+                doc_id = repo_name.replace("/", "__")
+                self.db.collection(f"{self.collection_name}_repo_memory").document(doc_id).set(record)
+                return
+            except Exception as e:
+                logger.error(f"Error saving repo memory to Firestore: {e}. Attempting SQLite fallback.")
+
+        conn = sqlite3.connect(str(self.sqlite_db_path))
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO repo_memory (repo_name, record_json, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(repo_name) DO UPDATE SET
+                record_json=excluded.record_json,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (repo_name, json.dumps(record))
+        )
+        conn.commit()
+        conn.close()
+
+    def load_repo_memory(self, repo_name: str) -> dict:
+        """Loads a repository's memory record. Returns {} when none exists."""
+        if self.backend == "firestore":
+            try:
+                doc_id = repo_name.replace("/", "__")
+                doc = self.db.collection(f"{self.collection_name}_repo_memory").document(doc_id).get()
+                if doc.exists:
+                    return doc.to_dict() or {}
+            except Exception as e:
+                logger.error(f"Error loading repo memory from Firestore: {e}. Attempting SQLite fallback.")
+
+        conn = sqlite3.connect(str(self.sqlite_db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT record_json FROM repo_memory WHERE repo_name = ?", (repo_name,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            try:
+                return json.loads(row[0]) or {}
+            except Exception:
+                return {}
+        return {}
 
     def delete_state(self, session_id: str):
         """Deletes a state by session_id."""

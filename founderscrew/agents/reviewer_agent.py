@@ -8,7 +8,7 @@ def get_reviewer_agent() -> LlmAgent:
     return LlmAgent(
         name="ReviewerAgent",
         description="Autonomous code reviewer agent that scans files for improvements, bugs, and CodeRabbit suggestions.",
-        model=settings.get("agents.planning_model", "gemini-2.5-pro"),
+        model=settings.get("agents.planning_model", "gemini-3.5-flash"),
         instruction="""You are a Lead Code Reviewer.
 Your job is to review modifications made to files, check for logical soundness, style, security issues, and check CodeRabbit suggestions.
 

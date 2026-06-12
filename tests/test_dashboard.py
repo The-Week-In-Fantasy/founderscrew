@@ -1,8 +1,12 @@
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch, AsyncMock
-from founderscrew.dashboard.app import app
+from founderscrew.dashboard.app import app, auth_required
 from founderscrew.state.models import WorkflowStatus
+
+# Bypass dashboard basic auth so tests pass regardless of whether the local
+# environment has DASHBOARD_PASSWORD configured
+app.dependency_overrides[auth_required] = lambda: None
 
 client = TestClient(app)
 

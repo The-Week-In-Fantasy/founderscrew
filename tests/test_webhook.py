@@ -22,9 +22,12 @@ def test_webhook_github_issues_ignored_label():
     assert resp.status_code == 200
     assert resp.json() == {"status": "ignored"}
 
-@patch("founderscrew.webhook.server.settings.get", return_value="crew:ready")
+@patch("founderscrew.webhook.server.settings.get")
 @patch("founderscrew.webhook.server.orchestrator.handle_issue_labeled")
 def test_webhook_github_issues_labeled_trigger(mock_handle, mock_settings_get):
+    mock_settings_get.side_effect = lambda key, default=None: {
+        "github.trigger_label": "crew:ready"
+    }.get(key, default)
     resp = client.post(
         "/webhook/github",
         json={
@@ -56,6 +59,40 @@ def test_webhook_github_comment_created(mock_handle):
     assert resp.status_code == 200
     assert resp.json() == {"status": "processing_comment"}
     mock_handle.assert_called_once_with("owner/repo", 100, "approve", "founder-bob")
+
+def test_webhook_rejects_missing_or_invalid_signature(monkeypatch):
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "topsecret")
+    # No signature header at all
+    resp = client.post(
+        "/webhook/github",
+        json={"action": "labeled", "label": {"name": "crew:ready"}},
+        headers={"X-GitHub-Event": "issues"}
+    )
+    assert resp.status_code == 401
+    # Wrong signature
+    resp = client.post(
+        "/webhook/github",
+        json={"action": "labeled", "label": {"name": "crew:ready"}},
+        headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": "sha256=deadbeef"}
+    )
+    assert resp.status_code == 401
+
+def test_webhook_accepts_valid_signature(monkeypatch):
+    import hmac, hashlib, json
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "topsecret")
+    body = json.dumps({"action": "labeled", "label": {"name": "not-the-trigger"}}).encode()
+    sig = "sha256=" + hmac.new(b"topsecret", body, hashlib.sha256).hexdigest()
+    resp = client.post(
+        "/webhook/github",
+        content=body,
+        headers={
+            "X-GitHub-Event": "issues",
+            "X-Hub-Signature-256": sig,
+            "Content-Type": "application/json"
+        }
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ignored"}
 
 def test_a2a_qa_endpoint_invalid_jsonrpc():
     resp = client.post(

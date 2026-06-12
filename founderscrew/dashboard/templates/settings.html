@@ -172,38 +172,55 @@
             <i class="fa-solid fa-brain"></i> 3. Agent AI Models
         </h3>
 
+        {# Model catalogs — current as of June 2026, prices are $ input / $ output
+           per 1M tokens. Preview models are offered but never defaulted (Google
+           retires previews on short notice). #}
+        {% set fast_options = [
+            ('gemini/gemini-3.1-flash-lite', 'gemini-3.1-flash-lite — $0.25 / $1.50 (Google · GA)'),
+            ('gemini/gemini-3-flash', 'gemini-3-flash — $0.50 / $3.00 (Google · GA)'),
+            ('gemini/gemini-2.5-flash', 'gemini-2.5-flash — $0.30 / $2.50 (Google · legacy)'),
+            ('gemini/gemini-3.5-flash', 'gemini-3.5-flash — $1.50 / $9.00 (Google · frontier)'),
+            ('vertex_ai/xai/grok-4.3', 'grok-4.3 — $1.25 / $2.50 (Vertex AI · Google billing)'),
+            ('vertex_ai/claude-haiku-4-5', 'claude-haiku-4-5 — $1.00 / $5.00 (Vertex AI · Google billing)'),
+            ('vertex_ai/xai/grok-4.1-fast-reasoning', 'grok-4.1-fast-reasoning — $0.20 / $0.50 (Vertex AI · Google billing, 2M ctx)'),
+            ('vertex_ai/meta/llama-4-maverick-17b-128e-instruct-maas', 'llama-4-maverick — ~$0.35 / $1.15 (Vertex AI · Google billing)'),
+            ('xai/grok-4.1-fast', 'grok-4.1-fast — $0.20 / $0.50 (xAI direct, 2M ctx)'),
+            ('anthropic/claude-haiku-4-5', 'claude-haiku-4-5 — $1.00 / $5.00 (Anthropic direct)'),
+            ('openai/gpt-5.4-mini', 'gpt-5.4-mini — $0.75 / $4.50 (OpenAI)')
+        ] %}
+        {% set planning_options = [
+            ('gemini/gemini-3.5-flash', 'gemini-3.5-flash — $1.50 / $9.00 (Google · frontier, GA)'),
+            ('gemini/gemini-3.1-pro-preview', 'gemini-3.1-pro-preview — $2.00 / $12.00 (Google · preview)'),
+            ('gemini/gemini-2.5-pro', 'gemini-2.5-pro — $1.25 / $10.00 (Google · legacy)'),
+            ('vertex_ai/claude-sonnet-4-6', 'claude-sonnet-4-6 — $3.00 / $15.00 (Vertex AI · Google billing)'),
+            ('vertex_ai/claude-opus-4-8', 'claude-opus-4-8 — $5.00 / $25.00 (Vertex AI · Google billing)'),
+            ('vertex_ai/xai/grok-4.3', 'grok-4.3 — $1.25 / $2.50 (Vertex AI · Google billing)'),
+            ('vertex_ai/meta/llama-4-maverick-17b-128e-instruct-maas', 'llama-4-maverick — ~$0.35 / $1.15 (Vertex AI · Google billing)'),
+            ('xai/grok-4.3', 'grok-4.3 — $1.25 / $2.50 (xAI direct · flagship)'),
+            ('anthropic/claude-sonnet-4-6', 'claude-sonnet-4-6 — $3.00 / $15.00 (Anthropic direct)'),
+            ('anthropic/claude-opus-4-8', 'claude-opus-4-8 — $5.00 / $25.00 (Anthropic direct)'),
+            ('openai/gpt-5.5', 'gpt-5.5 — $5.00 / $30.00 (OpenAI · flagship)')
+        ] %}
+        {% set fast_defaults = ['gemini/gemini-3.1-flash-lite', 'gemini/gemini-3-flash', 'vertex_ai/xai/grok-4.1-fast-reasoning'] %}
+        {% set planning_defaults = ['gemini/gemini-3.5-flash', 'vertex_ai/claude-sonnet-4-6', 'gemini/gemini-2.5-pro'] %}
+
         <div style="display: flex; flex-direction: column; gap: 1.5rem;">
             <!-- Fast Model Tiers (Triage, Tester, QA, Deployer) -->
             <div>
                 <h4 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--text-muted);">Fast Agent Model Tiers (Triage, Tester, QA, Deployer)</h4>
                 <div class="form-row" style="grid-template-columns: 1fr 1fr 1fr;">
+                    {% for tier in [1, 2, 3] %}
+                    {% set saved = config.agents['fast_tier' ~ tier] or (config.agents.fast_model if tier == 1 else None) %}
+                    {% set cur = saved or fast_defaults[tier - 1] %}
                     <div class="form-group">
-                        <label for="fast_tier1">Fast Tier 1 (Primary)</label>
-                        <select id="fast_tier1" name="fast_tier1" class="form-control">
-                            <option value="gemini/gemini-2.5-flash" {% if config.agents.fast_tier1 == 'gemini/gemini-2.5-flash' or config.agents.fast_model == 'gemini/gemini-2.5-flash' or config.agents.fast_model == 'gemini-2.5-flash' %}selected{% endif %}>gemini-2.5-flash</option>
-                            <option value="gemini/gemini-2.5-pro" {% if config.agents.fast_tier1 == 'gemini/gemini-2.5-pro' or config.agents.fast_model == 'gemini/gemini-2.5-pro' or config.agents.fast_model == 'gemini-2.5-pro' %}selected{% endif %}>gemini-2.5-pro</option>
-                            <option value="openai/gpt-4o-mini" {% if config.agents.fast_tier1 == 'openai/gpt-4o-mini' %}selected{% endif %}>gpt-4o-mini</option>
-                            <option value="anthropic/claude-3-haiku" {% if config.agents.fast_tier1 == 'anthropic/claude-3-haiku' %}selected{% endif %}>claude-3-haiku</option>
+                        <label for="fast_tier{{ tier }}">Fast Tier {{ tier }} ({{ ['Primary', 'Secondary', 'Tertiary'][tier - 1] }})</label>
+                        <select id="fast_tier{{ tier }}" name="fast_tier{{ tier }}" class="form-control">
+                            {% for val, label in fast_options %}
+                            <option value="{{ val }}" {% if cur == val or cur == val.replace('gemini/', '') %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
                         </select>
                     </div>
-                    <div class="form-group">
-                        <label for="fast_tier2">Fast Tier 2 (Secondary)</label>
-                        <select id="fast_tier2" name="fast_tier2" class="form-control">
-                            <option value="gemini/gemini-2.5-pro" {% if config.agents.fast_tier2 == 'gemini/gemini-2.5-pro' %}selected{% endif %}>gemini-2.5-pro</option>
-                            <option value="gemini/gemini-2.5-flash" {% if config.agents.fast_tier2 == 'gemini/gemini-2.5-flash' or not config.agents.fast_tier2 %}selected{% endif %}>gemini-2.5-flash</option>
-                            <option value="openai/gpt-4o-mini" {% if config.agents.fast_tier2 == 'openai/gpt-4o-mini' %}selected{% endif %}>gpt-4o-mini</option>
-                            <option value="anthropic/claude-3-haiku" {% if config.agents.fast_tier2 == 'anthropic/claude-3-haiku' %}selected{% endif %}>claude-3-haiku</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="fast_tier3">Fast Tier 3 (Tertiary)</label>
-                        <select id="fast_tier3" name="fast_tier3" class="form-control">
-                            <option value="openai/gpt-4o-mini" {% if config.agents.fast_tier3 == 'openai/gpt-4o-mini' or not config.agents.fast_tier3 %}selected{% endif %}>gpt-4o-mini</option>
-                            <option value="gemini/gemini-2.5-flash" {% if config.agents.fast_tier3 == 'gemini/gemini-2.5-flash' %}selected{% endif %}>gemini-2.5-flash</option>
-                            <option value="gemini/gemini-2.5-pro" {% if config.agents.fast_tier3 == 'gemini/gemini-2.5-pro' %}selected{% endif %}>gemini-2.5-pro</option>
-                            <option value="anthropic/claude-3-haiku" {% if config.agents.fast_tier3 == 'anthropic/claude-3-haiku' %}selected{% endif %}>claude-3-haiku</option>
-                        </select>
-                    </div>
+                    {% endfor %}
                 </div>
             </div>
 
@@ -211,35 +228,21 @@
             <div>
                 <h4 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--text-muted);">Planning Agent Model Tiers (Planner, Builder, Reviewer)</h4>
                 <div class="form-row" style="grid-template-columns: 1fr 1fr 1fr;">
+                    {% for tier in [1, 2, 3] %}
+                    {% set saved = config.agents['planning_tier' ~ tier] or (config.agents.planning_model if tier == 1 else None) %}
+                    {% set cur = saved or planning_defaults[tier - 1] %}
                     <div class="form-group">
-                        <label for="planning_tier1">Planning Tier 1 (Primary)</label>
-                        <select id="planning_tier1" name="planning_tier1" class="form-control">
-                            <option value="gemini/gemini-2.5-pro" {% if config.agents.planning_tier1 == 'gemini/gemini-2.5-pro' or config.agents.planning_model == 'gemini/gemini-2.5-pro' or config.agents.planning_model == 'gemini-2.5-pro' %}selected{% endif %}>gemini-2.5-pro</option>
-                            <option value="openai/gpt-4o" {% if config.agents.planning_tier1 == 'openai/gpt-4o' %}selected{% endif %}>gpt-4o</option>
-                            <option value="anthropic/claude-3-5-sonnet" {% if config.agents.planning_tier1 == 'anthropic/claude-3-5-sonnet' %}selected{% endif %}>claude-3-5-sonnet</option>
-                            <option value="gemini/gemini-2.5-flash" {% if config.agents.planning_tier1 == 'gemini/gemini-2.5-flash' %}selected{% endif %}>gemini-2.5-flash</option>
+                        <label for="planning_tier{{ tier }}">Planning Tier {{ tier }} ({{ ['Primary', 'Secondary', 'Tertiary'][tier - 1] }})</label>
+                        <select id="planning_tier{{ tier }}" name="planning_tier{{ tier }}" class="form-control">
+                            {% for val, label in planning_options %}
+                            <option value="{{ val }}" {% if cur == val or cur == val.replace('gemini/', '') %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
                         </select>
                     </div>
-                    <div class="form-group">
-                        <label for="planning_tier2">Planning Tier 2 (Secondary)</label>
-                        <select id="planning_tier2" name="planning_tier2" class="form-control">
-                            <option value="openai/gpt-4o" {% if config.agents.planning_tier2 == 'openai/gpt-4o' %}selected{% endif %}>gpt-4o</option>
-                            <option value="gemini/gemini-2.5-pro" {% if config.agents.planning_tier2 == 'gemini/gemini-2.5-pro' or not config.agents.planning_tier2 %}selected{% endif %}>gemini-2.5-pro</option>
-                            <option value="anthropic/claude-3-5-sonnet" {% if config.agents.planning_tier2 == 'anthropic/claude-3-5-sonnet' %}selected{% endif %}>claude-3-5-sonnet</option>
-                            <option value="gemini/gemini-2.5-flash" {% if config.agents.planning_tier2 == 'gemini/gemini-2.5-flash' %}selected{% endif %}>gemini-2.5-flash</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="planning_tier3">Planning Tier 3 (Tertiary)</label>
-                        <select id="planning_tier3" name="planning_tier3" class="form-control">
-                            <option value="anthropic/claude-3-5-sonnet" {% if config.agents.planning_tier3 == 'anthropic/claude-3-5-sonnet' or not config.agents.planning_tier3 %}selected{% endif %}>claude-3-5-sonnet</option>
-                            <option value="gemini/gemini-2.5-pro" {% if config.agents.planning_tier3 == 'gemini/gemini-2.5-pro' %}selected{% endif %}>gemini-2.5-pro</option>
-                            <option value="openai/gpt-4o" {% if config.agents.planning_tier3 == 'openai/gpt-4o' %}selected{% endif %}>gpt-4o</option>
-                            <option value="gemini/gemini-2.5-flash" {% if config.agents.planning_tier3 == 'gemini/gemini-2.5-flash' %}selected{% endif %}>gemini-2.5-flash</option>
-                        </select>
-                    </div>
+                    {% endfor %}
                 </div>
             </div>
+            <span class="help-text">Tiers are tried in order; a tier is skipped automatically if its provider's credentials are missing. "Vertex AI · Google billing" models are Model Garden partner models billed to your GCP project — they need GOOGLE_CLOUD_PROJECT plus Application Default Credentials (automatic on Cloud Run; locally run <code>gcloud auth application-default login</code>) and the model enabled once in the Vertex Model Garden console. Direct-provider models need that provider's API key. If a saved model is end-of-life, the dropdown falls back to the recommended default — hit Save to migrate.</span>
         </div>
 
         <div style="margin-top: 2rem; display: flex; justify-content: flex-end; gap: 1rem;">

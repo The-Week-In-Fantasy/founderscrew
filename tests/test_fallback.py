@@ -94,6 +94,24 @@ async def test_orchestrator_run_agent_fallback(temp_db_path):
                 assert output == "Triage complete output"
                 assert call_count == 2  # Proves Tier 1 failed and Tier 2 was executed
 
+def test_vertex_tier_requires_gcp_project(monkeypatch):
+    """Vertex AI partner tiers are gated on a GCP project, not provider API keys."""
+    from founderscrew.tools.model_routing import filter_available_tiers
+
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with patch.dict(settings.config, {"google": {"api_key": "fake", "project_id": ""}, "coding_tools": {}}):
+        # No GCP project: vertex tier is skipped even though it names "claude"
+        assert filter_available_tiers(
+            ["gemini/gemini-3.5-flash", "vertex_ai/claude-sonnet-4-6"]
+        ) == ["gemini/gemini-3.5-flash"]
+
+    with patch.dict(settings.config, {"google": {"api_key": "fake", "project_id": "my-gcp-project"}, "coding_tools": {}}):
+        # With a project, the vertex tier is available without an Anthropic key
+        assert filter_available_tiers(
+            ["vertex_ai/claude-sonnet-4-6"]
+        ) == ["vertex_ai/claude-sonnet-4-6"]
+
 def test_coding_adapter_fallback_cascade(tmp_path):
     """Verifies that CodingToolAdapter falls back sequentially through coding tool tiers and then to API mode."""
     adapter = CodingToolAdapter()

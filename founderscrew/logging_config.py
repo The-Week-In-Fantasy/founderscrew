@@ -4,6 +4,20 @@ from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".founderscrew"
 
+class _AccessLogNoiseFilter(logging.Filter):
+    """Drops successful GET request lines from uvicorn's access log.
+
+    The dashboard auto-refreshes every few seconds, flooding the log with
+    'GET / 200' and 'GET /logs/content 200' entries. POSTs (webhooks,
+    approvals), redirects, and error statuses are kept.
+    """
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        return not ('"GET ' in msg and msg.rstrip().endswith(" 200"))
+
 def setup_logging():
     """Sets up a robust, rotating file logger and console logger."""
     log_dir = CONFIG_DIR / "logs"
@@ -51,3 +65,8 @@ def setup_logging():
                 break
         if not has_file_handler:
             lib_logger.addHandler(file_handler)
+
+    # Silence dashboard polling noise everywhere uvicorn.access records go
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, _AccessLogNoiseFilter) for f in access_logger.filters):
+        access_logger.addFilter(_AccessLogNoiseFilter())

@@ -8,7 +8,7 @@ def get_planner_agent() -> LlmAgent:
     return LlmAgent(
         name="PlannerAgent",
         description="Autonomous planning agent that maps out step-by-step instructions to solve issues.",
-        model=settings.get("agents.planning_model", "gemini-2.5-pro"),
+        model=settings.get("agents.planning_model", "gemini-3.5-flash"),
         instruction="""You are a Principal Software Architect.
 Your job is to read a GitHub issue and the Triage Agent's findings, study the codebase, and write a detailed, step-by-step implementation plan.
 

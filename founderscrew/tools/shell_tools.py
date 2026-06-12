@@ -1,7 +1,13 @@
 import re
 import os
+import sys
+import time
+import logging
 import subprocess
-from typing import List, Dict, Any, Union
+import urllib.request
+from typing import List, Dict, Any, Union, Optional, Tuple
+
+logger = logging.getLogger("founderscrew.shell")
 
 # Safe commands regex list
 SAFE_COMMAND_PATTERNS = [
@@ -93,3 +99,55 @@ def run_safe_shell_command(command: Union[str, List[str]], cwd: str, timeout: in
             "stderr": f"Failed to execute command: {e}",
             "returncode": -3
         }
+
+def start_dev_server(workdir: str, command: Optional[str] = None, port: int = 3001,
+                     boot_timeout: int = 90) -> Tuple[Optional[subprocess.Popen], Optional[str]]:
+    """Starts the project's dev server so QA can screenshot a real running app.
+
+    Returns (process, url) once the server answers HTTP, or (None, None) if it
+    never came up within boot_timeout seconds.
+    """
+    command = command or f"npx vite --port {port} --strictPort"
+    url = f"http://localhost:{port}"
+    env = os.environ.copy()
+    env.update({"CI": "1", "PORT": str(port), "BROWSER": "none"})
+    try:
+        proc = subprocess.Popen(
+            command, shell=True, cwd=workdir, env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except Exception as e:
+        logger.warning(f"Failed to launch dev server '{command}': {e}")
+        return None, None
+
+    deadline = time.monotonic() + boot_timeout
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            logger.warning(f"Dev server '{command}' exited early with code {proc.returncode}.")
+            return None, None
+        try:
+            with urllib.request.urlopen(url, timeout=2):
+                return proc, url
+        except Exception:
+            time.sleep(2)
+
+    logger.warning(f"Dev server '{command}' did not answer on {url} within {boot_timeout}s.")
+    stop_dev_server(proc)
+    return None, None
+
+def stop_dev_server(proc: Optional[subprocess.Popen]) -> None:
+    """Stops a dev server started with start_dev_server, including child processes."""
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        if sys.platform == "win32":
+            # shell=True wraps the server in cmd.exe; kill the whole tree
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+        else:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+    except Exception as e:
+        logger.warning(f"Failed to stop dev server (pid {proc.pid}): {e}")

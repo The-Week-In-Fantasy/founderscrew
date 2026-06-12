@@ -14,6 +14,24 @@ def get_github_client() -> Github:
         )
     return Github(token)
 
+_BOT_LOGIN: Optional[str] = None
+_BOT_LOGIN_FETCHED = False
+
+def github_get_bot_login() -> Optional[str]:
+    """Returns the login of the authenticated bot account (cached after first call).
+
+    Used to ignore the crew's own GitHub comments so the approval gates can
+    never be triggered by text the bot itself posted.
+    """
+    global _BOT_LOGIN, _BOT_LOGIN_FETCHED
+    if not _BOT_LOGIN_FETCHED:
+        _BOT_LOGIN_FETCHED = True
+        try:
+            _BOT_LOGIN = get_github_client().get_user().login
+        except Exception:
+            _BOT_LOGIN = None
+    return _BOT_LOGIN
+
 def github_get_issue(repo_name: str, issue_number: int) -> Dict[str, Any]:
     """Retrieves details of a specific GitHub issue.
     
@@ -246,6 +264,96 @@ def github_merge_pr(repo_name: str, pr_number: int) -> bool:
     status = pr.merge()
     return status.merged
 
+# Files Founders.crew itself generates inside workspaces; never treated as
+# agent work-in-progress and never committed back to the user's repository.
+_WORKSPACE_ARTIFACTS = {".env", "playwright.config.js"}
+
+# Feature branch each repo's workspace should stay on while a workflow is in
+# flight. While set, clone_or_pull keeps the workspace on this branch instead
+# of resetting to the base branch (which would test/deploy the wrong code).
+_ACTIVE_BRANCHES: Dict[str, str] = {}
+
+def set_active_workspace_branch(repo_name: str, branch_name: Optional[str]) -> None:
+    """Pins (or unpins, when branch_name is None) the workspace to a feature branch."""
+    if branch_name:
+        _ACTIVE_BRANCHES[repo_name] = branch_name
+    else:
+        _ACTIVE_BRANCHES.pop(repo_name, None)
+
+def github_prepare_workspace_branch(repo_name: str, branch_name: str) -> str:
+    """Creates/resets the feature branch in the local workspace and pins it active.
+
+    Call after a fresh clone_or_pull so the branch starts from the latest base.
+    """
+    workdir = _workspace_dir(repo_name)
+    if not (workdir / ".git").exists():
+        raise RuntimeError(f"No local workspace found for {repo_name}; cannot create branch {branch_name}.")
+    res = subprocess.run(
+        ["git", "checkout", "-B", branch_name],
+        cwd=str(workdir), capture_output=True, text=True
+    )
+    if res.returncode != 0:
+        raise RuntimeError(f"Failed to create workspace branch {branch_name}: {res.stderr or res.stdout}")
+    set_active_workspace_branch(repo_name, branch_name)
+    return str(workdir.resolve())
+
+def _workspace_dir(repo_name: str) -> Path:
+    return Path.home() / ".founderscrew" / "workspaces" / repo_name.replace("/", "_")
+
+def _workspace_has_agent_changes(workdir: Path) -> bool:
+    """True if the workspace has uncommitted changes beyond our own artifacts."""
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=str(workdir), capture_output=True, text=True
+    )
+    for line in (status.stdout or "").splitlines():
+        path = line[3:].split(" -> ")[-1].strip().strip('"')
+        if path not in _WORKSPACE_ARTIFACTS:
+            return True
+    return False
+
+def github_push_workspace(repo_name: str, branch_name: str, commit_message: str) -> Dict[str, Any]:
+    """Commits all local workspace changes to a branch and pushes it to GitHub.
+
+    Args:
+        repo_name: Repository name (owner/repo)
+        branch_name: Branch to commit and push to (created if it doesn't exist)
+        commit_message: Commit message describing the changes
+    """
+    token = settings.get("github.token") or os.getenv("GITHUB_TOKEN")
+    workdir = _workspace_dir(repo_name)
+    if not (workdir / ".git").exists():
+        return {"success": False, "error": f"No local workspace found for {repo_name}. Nothing to push."}
+
+    def _git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *args], cwd=str(workdir), capture_output=True, text=True)
+
+    def _sanitize(text: str) -> str:
+        return text.replace(token, "***") if token else text
+
+    _git("checkout", "-B", branch_name)
+    _git("add", "-A")
+    # Never commit secrets or auto-injected test configuration
+    _git("reset", "-q", "--", *_WORKSPACE_ARTIFACTS)
+
+    commit = _git("commit", "-m", commit_message)
+    committed = commit.returncode == 0
+    if not committed and "nothing to commit" not in (commit.stdout + commit.stderr).lower():
+        return {"success": False, "error": f"git commit failed: {_sanitize(commit.stderr or commit.stdout)}"}
+
+    push_url = f"https://{token}@github.com/{repo_name}.git" if token else f"https://github.com/{repo_name}.git"
+    push = _git("push", push_url, f"HEAD:refs/heads/{branch_name}")
+    if push.returncode != 0:
+        return {"success": False, "error": f"git push failed: {_sanitize(push.stderr or push.stdout)}"}
+
+    sha = _git("rev-parse", "HEAD").stdout.strip()
+    return {
+        "success": True,
+        "branch": branch_name,
+        "commit_sha": sha,
+        "committed_new_changes": committed
+    }
+
 def github_clone_or_pull(repo_name: str) -> str:
     """Clones or pulls the repository to a local workspace directory and returns its absolute path.
     
@@ -255,19 +363,39 @@ def github_clone_or_pull(repo_name: str) -> str:
     token = settings.get("github.token") or os.getenv("GITHUB_TOKEN")
     base_branch = settings.get("github.base_branch", "main")
     
-    folder = repo_name.replace("/", "_")
-    workdir = Path.home() / ".founderscrew" / "workspaces" / folder
+    workdir = _workspace_dir(repo_name)
     workdir.mkdir(parents=True, exist_ok=True)
     
     # Check if .git folder exists
     if (workdir / ".git").exists():
-        # Ensure we're on the base branch and pull latest changes
-        subprocess.run(["git", "checkout", base_branch], cwd=str(workdir), capture_output=True)
-        subprocess.run(["git", "pull", "origin", base_branch], cwd=str(workdir), capture_output=True)
+        if _workspace_has_agent_changes(workdir):
+            # The Builder has uncommitted work in progress; a checkout/pull here
+            # would clobber it before the Tester/Deployer stages can use it.
+            pass
+        else:
+            active_branch = _ACTIVE_BRANCHES.get(repo_name)
+            if active_branch:
+                # A workflow is in flight: stay on (or return to) its feature
+                # branch rather than resetting to base
+                subprocess.run(["git", "fetch", "origin"], cwd=str(workdir), capture_output=True)
+                checkout = subprocess.run(["git", "checkout", active_branch], cwd=str(workdir), capture_output=True)
+                if checkout.returncode != 0:
+                    subprocess.run(["git", "checkout", "-B", active_branch], cwd=str(workdir), capture_output=True)
+            else:
+                # Ensure we're on the base branch and pull latest changes
+                subprocess.run(["git", "checkout", base_branch], cwd=str(workdir), capture_output=True)
+                pull = subprocess.run(["git", "pull", "origin", base_branch], cwd=str(workdir), capture_output=True, text=True)
+                if pull.returncode != 0:
+                    print(f"Warning: git pull for {repo_name} failed; continuing with existing local copy. {pull.stderr}")
     else:
         # Clone repo
         clone_url = f"https://{token}@github.com/{repo_name}.git" if token else f"https://github.com/{repo_name}.git"
-        subprocess.run(["git", "clone", "-b", base_branch, clone_url, "."], cwd=str(workdir), capture_output=True)
+        clone = subprocess.run(["git", "clone", "-b", base_branch, clone_url, "."], cwd=str(workdir), capture_output=True, text=True)
+        if clone.returncode != 0:
+            err = (clone.stderr or clone.stdout or "unknown error")
+            if token:
+                err = err.replace(token, "***")
+            raise RuntimeError(f"Failed to clone {repo_name} (base branch '{base_branch}'): {err}")
         
     # Generate .env file securely from keyring
     env_vars = settings.get("workspace_env", {})
