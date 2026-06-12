@@ -154,7 +154,7 @@ async def approve_step(session_id: str, step_type: str = Form(...)):
 @app.post("/run/trigger", response_class=RedirectResponse, dependencies=[Depends(auth_required)])
 async def trigger_run(issue_number: int = Form(...)):
     """Manually triggers the orchestrator flow for a GitHub issue by number."""
-    repo = settings.get("github.repository")
+    repo = settings.get("github.repository") or os.getenv("GITHUB_REPOSITORY")
     if not repo:
         raise HTTPException(status_code=400, detail="Repository not configured in settings")
         
@@ -173,6 +173,12 @@ async def retry_run(session_id: str):
     from founderscrew.webhook.server import orchestrator
     await orchestrator.resume_failed_workflow(session_id)
     return RedirectResponse(url=f"/run/{session_id}", status_code=303)
+
+@app.post("/run/{session_id}/delete", response_class=RedirectResponse, dependencies=[Depends(auth_required)])
+async def delete_run(session_id: str):
+    """Deletes a run from the dashboard and database."""
+    store.delete_state(session_id)
+    return RedirectResponse(url="/", status_code=303)
 
 @app.post("/run/{session_id}/replan", response_class=RedirectResponse, dependencies=[Depends(auth_required)])
 async def replan_run(session_id: str, feedback: str = Form("")):

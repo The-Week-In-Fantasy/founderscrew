@@ -136,3 +136,18 @@ class StateStore:
         conn.close()
         return [WorkflowStateModel.model_validate_json(row[0]) for row in rows]
 
+    def delete_state(self, session_id: str):
+        """Deletes a state by session_id."""
+        if self.backend == "firestore":
+            try:
+                self.db.collection(self.collection_name).document(session_id).delete()
+                return
+            except Exception as e:
+                logger.error(f"Error deleting from Firestore: {e}. Falling back to SQLite.")
+                
+        conn = sqlite3.connect(str(self.sqlite_db_path))
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM workflow_states WHERE session_id = ?", (session_id,))
+        conn.commit()
+        conn.close()
+
