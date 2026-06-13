@@ -40,3 +40,23 @@ def test_setup_logging(tmp_path, monkeypatch):
     finally:
         # Restore original root handlers
         root.handlers = original_handlers
+
+def test_setup_logging_filters_litellm_worker_noise(tmp_path, monkeypatch):
+    monkeypatch.setattr("founderscrew.logging_config.CONFIG_DIR", tmp_path)
+
+    root = logging.getLogger()
+    original_handlers = root.handlers[:]
+    root.handlers = []
+    litellm_logger = logging.getLogger("LiteLLM")
+    original_filters = litellm_logger.filters[:]
+    litellm_logger.filters = []
+
+    try:
+        setup_logging()
+        assert any(
+            filt.__class__.__name__ == "_LiteLLMLoggingWorkerNoiseFilter"
+            for filt in litellm_logger.filters
+        )
+    finally:
+        root.handlers = original_handlers
+        litellm_logger.filters = original_filters

@@ -18,6 +18,17 @@ class _AccessLogNoiseFilter(logging.Filter):
             return True
         return not ('"GET ' in msg and msg.rstrip().endswith(" 200"))
 
+class _LiteLLMLoggingWorkerNoiseFilter(logging.Filter):
+    """Drops known non-fatal LiteLLM async logging worker timeouts."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "LiteLLM":
+            return True
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        return "LoggingWorker error" not in msg
+
 def setup_logging():
     """Sets up a robust, rotating file logger and console logger."""
     log_dir = CONFIG_DIR / "logs"
@@ -70,3 +81,7 @@ def setup_logging():
     access_logger = logging.getLogger("uvicorn.access")
     if not any(isinstance(f, _AccessLogNoiseFilter) for f in access_logger.filters):
         access_logger.addFilter(_AccessLogNoiseFilter())
+
+    litellm_logger = logging.getLogger("LiteLLM")
+    if not any(isinstance(f, _LiteLLMLoggingWorkerNoiseFilter) for f in litellm_logger.filters):
+        litellm_logger.addFilter(_LiteLLMLoggingWorkerNoiseFilter())

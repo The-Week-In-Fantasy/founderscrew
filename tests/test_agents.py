@@ -14,6 +14,9 @@ def test_triage_agent_init():
     assert agent.name == "TriageAgent"
     assert len(agent.tools) > 0
     assert agent.output_key == "triage_result"
+    tool_names = {getattr(tool, "name", "") for tool in agent.tools}
+    assert "github_list_repo_files" not in tool_names
+    assert "github_get_issue" not in tool_names
 
 def test_planner_agent_init():
     agent = get_planner_agent()

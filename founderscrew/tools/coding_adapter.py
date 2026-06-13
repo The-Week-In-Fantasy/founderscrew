@@ -2,6 +2,7 @@ import os
 import re
 import subprocess
 import logging
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import litellm
@@ -35,11 +36,16 @@ class CodingToolAdapter:
         
         last_error = None
         for i, tool in enumerate(cli_tiers):
+            unavailable_reason = self._cli_unavailable_reason(tool)
+            if unavailable_reason:
+                logger.info(f"Skipping coding CLI tool {tool} (Tier {i+1}): {unavailable_reason}")
+                last_error = unavailable_reason
+                continue
             try:
                 logger.info(f"Attempting coding task using {tool} CLI (Tier {i+1}/{len(cli_tiers)})...")
                 return self._execute_cli(tool, instruction, files, workdir)
             except Exception as e:
-                logger.warning(f"Coding CLI tool {tool} (Tier {i+1}) failed: {e}")
+                logger.info(f"Coding CLI tool {tool} (Tier {i+1}) failed: {e}")
                 last_error = str(e)
                 
         # If all CLI tools fail, fall back to API mode automatically
@@ -48,6 +54,19 @@ class CodingToolAdapter:
             return self._execute_api(instruction, files, workdir)
         except Exception as api_err:
             raise RuntimeError(f"All coding tools and API fallbacks failed. Last CLI error: {last_error}. API error: {api_err}")
+
+    def _cli_unavailable_reason(self, tool: str) -> Optional[str]:
+        executable = {
+            "claude": "claude",
+            "cursor": "cursor",
+            "gemini": "gemini",
+            "codex": "codex",
+        }.get(tool)
+        if not executable:
+            return f"Unknown CLI tool: {tool}"
+        if not shutil.which(executable):
+            return f"{executable} executable was not found on PATH"
+        return None
 
     def _execute_cli(self, tool: str, instruction: str, files: List[str], workdir: str) -> Dict[str, Any]:
         """Runs the task using local CLI tools."""
@@ -62,13 +81,12 @@ class CodingToolAdapter:
             # Cursor CLI: cursor --exec "instruction"
             cmd = ["cursor", "--exec", f"{instruction} on {files_str}"]
         elif tool == "gemini":
-            # Gemini CLI: gemini code "instruction"
-            cmd = ["gemini", "code", f"{instruction} on {files_str}", "--skip-trust"]
+            # Gemini CLI: headless prompt mode
+            cmd = ["gemini", "--prompt", f"{instruction} on {files_str}", "--skip-trust", "--approval-mode", "yolo"]
             env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
         elif tool == "codex":
             # Codex CLI: codex exec
-            cmd = ["codex", "exec", f"{instruction} on {files_str}"]
-            cmd.extend(["--dangerously-bypass-approvals-and-sandbox", "--ask-for-approval", "never"])
+            cmd = ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", f"{instruction} on {files_str}"]
         else:
             raise ValueError(f"Unknown CLI tool: {tool}")
 
@@ -97,6 +115,12 @@ class CodingToolAdapter:
 
     def _execute_api(self, instruction: str, files: List[str], workdir: str) -> Dict[str, Any]:
         """Runs the task using direct API calls (via LiteLLM) to edit files, trying planning tiers if needed."""
+        if self._looks_like_shell_remediation(instruction):
+            raise RuntimeError(
+                "Refusing to send shell-command remediation through API file-edit fallback. "
+                "Use an orchestrator-owned safe tool for git/index or shell operations."
+            )
+
         # Resolve planning model tiers
         tier1 = settings.get("agents.planning_tier1", settings.get("agents.planning_model", "gemini/gemini-3.5-flash"))
         tier2 = settings.get("agents.planning_tier2", None)
@@ -165,11 +189,14 @@ Do not output diffs. Output the full complete file content for each file you edi
                 from founderscrew.tools.model_routing import apply_provider_env
                 apply_provider_env()
 
-                response = litellm.completion(
-                    model=model,
-                    messages=messages,
-                    temperature=0.1
-                )
+                completion_kwargs = {
+                    "model": model,
+                    "messages": messages,
+                }
+                if not self._is_gemini_3_plus(model):
+                    completion_kwargs["temperature"] = 0.1
+
+                response = litellm.completion(**completion_kwargs)
                 
                 content_response = response.choices[0].message.content
                 
@@ -213,10 +240,29 @@ Do not output diffs. Output the full complete file content for each file you edi
                         "modified_files": modified_files
                     }
                 else:
-                    raise RuntimeError("No modified files parsed from API response.")
+                    excerpt = (content_response or "").strip().replace("\n", " ")[:500]
+                    raise RuntimeError(f"No modified files parsed from API response. Response excerpt: {excerpt}")
             except Exception as e:
                 logger.error(f"API Mode execution with model {model} failed: {e}")
                 last_error = str(e)
                 
         raise RuntimeError(f"API mode failed all planning model tiers. Last error: {last_error}")
 
+    def _looks_like_shell_remediation(self, instruction: str) -> bool:
+        text = (instruction or "").strip().lower()
+        if not text.startswith(("run ", "execute ")):
+            return False
+        command_patterns = [
+            r"\bgit\s+(?:rm|add|checkout|reset|clean|commit|push|pull|fetch)\b",
+            r"\brm\s+-",
+            r"\bdel\s+",
+            r"\bremove-item\b",
+            r"\bnpm\s+",
+            r"\bpytest\b",
+            r"\bpython\s+-m\b",
+        ]
+        return any(re.search(pattern, text) for pattern in command_patterns)
+
+    def _is_gemini_3_plus(self, model: str) -> bool:
+        model_name = (model or "").lower().split("/")[-1]
+        return model_name.startswith("gemini-3")

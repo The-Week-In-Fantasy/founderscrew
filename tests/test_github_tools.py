@@ -69,6 +69,27 @@ def test_github_get_file_content(mock_github):
     assert res == "hello world"
     mock_repo.get_contents.assert_called_with("src/main.py", ref="dev")
 
+def test_github_get_file_content_returns_error_on_missing_repo(mock_github):
+    mock_github.get_repo.side_effect = Exception("404 Not Found")
+
+    res = github_get_file_content("missing/repo", "src/main.py")
+
+    assert "Error retrieving file" in res
+
+def test_github_list_repo_files_returns_empty_on_missing_repo(mock_github):
+    mock_github.get_repo.side_effect = Exception("404 Not Found")
+
+    res = github_list_repo_files("missing/repo")
+
+    assert res == []
+
+def test_github_search_code_returns_empty_on_error(mock_github):
+    mock_github.search_code.side_effect = Exception("404 Not Found")
+
+    res = github_search_code("missing/repo", "Widget")
+
+    assert res == []
+
 def test_github_add_comment(mock_github):
     mock_repo = MagicMock()
     mock_issue = MagicMock()

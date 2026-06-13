@@ -112,6 +112,28 @@ def test_vertex_tier_requires_gcp_project(monkeypatch):
             ["vertex_ai/claude-sonnet-4-6"]
         ) == ["vertex_ai/claude-sonnet-4-6"]
 
+def test_apply_provider_env_uses_single_google_key(monkeypatch):
+    from founderscrew.tools.model_routing import apply_provider_env
+
+    monkeypatch.setenv("GEMINI_API_KEY", "old-gemini-key")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    with patch.dict(settings.config, {"google": {"api_key": "canonical-google-key", "project_id": ""}, "coding_tools": {}}):
+        apply_provider_env()
+
+    assert os.environ["GOOGLE_API_KEY"] == "canonical-google-key"
+    assert "GEMINI_API_KEY" not in os.environ
+
+def test_apply_provider_env_removes_duplicate_gemini_key_from_host_env(monkeypatch):
+    from founderscrew.tools.model_routing import apply_provider_env
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "host-google-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "host-gemini-key")
+    with patch.dict(settings.config, {"google": {"api_key": "", "project_id": ""}, "coding_tools": {}}):
+        apply_provider_env()
+
+    assert os.environ["GOOGLE_API_KEY"] == "host-google-key"
+    assert "GEMINI_API_KEY" not in os.environ
+
 def test_coding_adapter_fallback_cascade(tmp_path):
     """Verifies that CodingToolAdapter falls back sequentially through coding tool tiers and then to API mode."""
     adapter = CodingToolAdapter()
@@ -153,7 +175,8 @@ def test_coding_adapter_fallback_cascade(tmp_path):
                 result.stderr = ""
                 return result
                 
-        with patch("subprocess.run", side_effect=mock_subprocess_run):
+        with patch("founderscrew.tools.coding_adapter.shutil.which", return_value="tool"), \
+             patch("subprocess.run", side_effect=mock_subprocess_run):
             res = adapter.execute_coding_task(
                 instruction="edit code",
                 files=["main.py"],
@@ -195,7 +218,8 @@ def test_coding_adapter_all_cli_fail_cascades_to_api(tmp_path):
         mock_choice.message = mock_message
         mock_response.choices = [mock_choice]
         
-        with patch("subprocess.run", return_value=mock_result), \
+        with patch("founderscrew.tools.coding_adapter.shutil.which", return_value="tool"), \
+             patch("subprocess.run", return_value=mock_result), \
              patch("litellm.completion", return_value=mock_response) as mock_litellm:
                  
             res = adapter.execute_coding_task(

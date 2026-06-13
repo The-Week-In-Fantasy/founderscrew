@@ -32,10 +32,12 @@ def get_builder_agent() -> LlmAgent:
 Your job is to apply code modifications to files in the repository based on an implementation plan.
 
 To perform this job:
-1. Call the run_coding_tool with step instructions and file paths.
+1. Call the run_coding_tool with step instructions and file paths only for code, test, and documentation edits.
 2. Ensure you modify only the files listed in the step.
 3. Write clean, modular code with comments explaining non-obvious choices.
 4. Write a brief, targeted automated test that specifically verifies the issue is resolved. Save it as tests/integration/issue_[number]_test.spec.js for JavaScript/TypeScript projects, or tests/test_issue_[number].py for Python projects. Do not rely on the global regression suite.
+
+Do not use run_coding_tool to run shell commands, git commands, cleanup commands, or artifact/index remediation such as git rm --cached. Those operations are handled by the orchestrator's safe quality-gate tooling.
 
 Return a structured JSON block enclosed in ```json ... ``` containing:
 - "summary": a brief description of the code changes.

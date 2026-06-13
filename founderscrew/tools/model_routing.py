@@ -52,7 +52,12 @@ def apply_provider_env() -> None:
     g_key = settings.get("google.api_key")
     if g_key:
         os.environ["GOOGLE_API_KEY"] = g_key
-        os.environ["GEMINI_API_KEY"] = g_key
+        os.environ.pop("GEMINI_API_KEY", None)
+    elif os.environ.get("GOOGLE_API_KEY") and os.environ.get("GEMINI_API_KEY"):
+        os.environ.pop("GEMINI_API_KEY", None)
+    elif os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
+        os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
+        os.environ.pop("GEMINI_API_KEY", None)
 
     for cfg_key, env_var in (
         ("coding_tools.openai_api_key", "OPENAI_API_KEY"),

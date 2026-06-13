@@ -49,6 +49,21 @@ from founderscrew.tools.model_routing import filter_available_tiers, apply_provi
 from founderscrew.workflow_queue import WorkflowQueue
 from pathlib import Path
 
+GENERATED_ARTIFACT_PATHS = [
+    ".env",
+    "playwright.config.js",
+    "current_page.png",
+    "current_screenshot.png",
+    "local_test_page.png",
+]
+GENERATED_ARTIFACT_DIRS = [
+    ".test_home",
+    ".tmp_pytest",
+    ".tmp_pytest_cache",
+    ".pytest_cache",
+    ".founderscrew",
+]
+
 class Orchestrator:
     """Orchestrates events and state transitions for the Founders.crew DevOps agent workflow."""
 
@@ -77,6 +92,25 @@ class Orchestrator:
         except Exception as e:
             logger.warning(f"Repo memory unavailable for {repo_name}: {e}")
             return ""
+
+    def _workspace_file_list(self, workdir: Optional[str], limit: int = 300) -> List[str]:
+        """Returns a compact local file listing for agents without hitting GitHub APIs."""
+        if not workdir:
+            return []
+        root = Path(workdir)
+        skip_dirs = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", "coverage"}
+        files: List[str] = []
+        try:
+            for path in root.rglob("*"):
+                if len(files) >= limit:
+                    break
+                if any(part in skip_dirs for part in path.parts):
+                    continue
+                if path.is_file():
+                    files.append(path.relative_to(root).as_posix())
+        except Exception as e:
+            logger.warning(f"Could not list workspace files for triage: {e}")
+        return files
 
     def _as_bool(self, value: Any, default: bool = False) -> bool:
         if isinstance(value, bool):
@@ -463,12 +497,15 @@ class Orchestrator:
         # 4. Execute Triage
         try:
             issue_details = {
+                "number": state.issue.number,
+                "repository": repo_name,
                 "title": state.issue.title,
                 "body": state.issue.body,
                 "creator": state.issue.creator,
                 "labels": state.issue.labels,
                 "comments": [],
-                "repo_context": repo_memory
+                "repo_context": repo_memory,
+                "repo_files": self._workspace_file_list(workdir),
             }
             triage_data = await self._run_agent_json(get_triage_agent, session_id, issue_details)
 
@@ -789,15 +826,7 @@ class Orchestrator:
         attempt: int = 1,
         remediation_summary: str = "",
     ) -> QualityGateResult:
-        generated_paths = [
-            ".env",
-            "playwright.config.js",
-            ".test_home",
-            ".tmp_pytest",
-            ".tmp_pytest_cache",
-            ".pytest_cache",
-            ".founderscrew",
-        ]
+        generated_paths = GENERATED_ARTIFACT_PATHS + GENERATED_ARTIFACT_DIRS
         try:
             result = subprocess.run(
                 ["git", "ls-files", "--", *generated_paths],
@@ -835,6 +864,52 @@ class Orchestrator:
             remediation_summary=remediation_summary,
         )
 
+    def _is_generated_artifact_path(self, path: str) -> bool:
+        normalized = (path or "").replace("\\", "/").strip()
+        if (
+            not normalized
+            or normalized.startswith("/")
+            or normalized == ".."
+            or normalized.startswith("../")
+            or "/../" in normalized
+        ):
+            return False
+        if normalized in GENERATED_ARTIFACT_PATHS:
+            return True
+        return any(normalized == d or normalized.startswith(f"{d}/") for d in GENERATED_ARTIFACT_DIRS)
+
+    def _untrack_generated_artifacts(self, workdir: str, paths: List[str]) -> tuple[bool, str]:
+        unique_paths = []
+        for path in paths:
+            normalized = (path or "").replace("\\", "/").strip()
+            if normalized and normalized not in unique_paths:
+                unique_paths.append(normalized)
+
+        unsafe = [path for path in unique_paths if not self._is_generated_artifact_path(path)]
+        if unsafe:
+            return False, "Refusing to untrack non-generated artifact paths: " + ", ".join(unsafe)
+        if not unique_paths:
+            return False, "Artifact hygiene remediation had no generated artifact paths to untrack."
+
+        try:
+            result = subprocess.run(
+                ["git", "rm", "--cached", "--", *unique_paths],
+                cwd=workdir,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except Exception as e:
+            return False, f"Failed to untrack generated artifacts: {e}"
+
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        if result.returncode != 0:
+            detail = stderr or stdout or f"git rm exited with code {result.returncode}"
+            return False, f"Failed to untrack generated artifacts: {detail}"
+        detail = stdout or "Generated artifacts removed from git index."
+        return True, f"Untracked generated artifacts from git index: {', '.join(unique_paths)}\n{detail}"
+
     async def _run_quality_gate_with_self_heal(
         self,
         state: WorkflowStateModel,
@@ -868,6 +943,29 @@ class Orchestrator:
                 return False
             attempt += 1
             remediation_summary = f"Remediated failed {name} gate on attempt {attempt}."
+            if name == "artifact_hygiene":
+                ok, summary = self._untrack_generated_artifacts(workdir, gate.artifact_paths)
+                remediation_summary = summary
+                if not ok:
+                    message = (
+                        f"Quality gate '{name}' could not self-heal generated artifacts.\n"
+                        f"Command: git rm --cached -- generated artifacts\n"
+                        f"Output:\n{summary}"
+                    )
+                    state.final_evidence_summary = self._build_final_evidence_summary(state)
+                    self._fail(state, name, message)
+                    self._add_issue_comment(
+                        state.issue.repository,
+                        state.issue.number,
+                        f"❌ Quality gate failed: **{name}**\n```\n{message[:2500]}\n```",
+                    )
+                    return False
+                self._add_issue_comment(
+                    state.issue.repository,
+                    state.issue.number,
+                    f"🔧 Quality gate **{name}** self-healed generated artifacts without changing working files.",
+                )
+                continue
             instruction = (
                 f"The quality gate '{name}' failed. Fix the root cause, keep the original issue goal intact, "
                 f"and update code/tests/docs only as needed.\n\n"

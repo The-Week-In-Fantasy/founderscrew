@@ -1,4 +1,5 @@
 import pytest
+import subprocess
 from unittest.mock import patch, AsyncMock
 from founderscrew.state.models import (
     ImplementationPlanModel,
@@ -355,6 +356,63 @@ async def test_builder_fix_receives_and_records_change_context(temp_db_path):
             assert updated.modified_files == ["a.js", "b.js"]
             assert updated.test_command == "npm test -- widget"
             assert "Fix pass: kept widget fix and added fallback" in updated.build_summaries
+
+@pytest.mark.anyio
+async def test_artifact_hygiene_self_heals_tracked_generated_file(tmp_path):
+    orch = Orchestrator()
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    artifact = tmp_path / "playwright.config.js"
+    artifact.write_text("module.exports = {};\n", encoding="utf-8")
+    subprocess.run(["git", "add", "playwright.config.js"], cwd=tmp_path, check=True, capture_output=True, text=True)
+
+    state = WorkflowStateModel(
+        session_id="o_r_artifact",
+        issue=IssueContext(number=11, title="Fix artifact", creator="c", repository="o/r"),
+        status=WorkflowStatus.TESTING,
+        plan=ImplementationPlanModel(summary="Fix artifact", steps=[]),
+    )
+
+    with patch("founderscrew.orchestrator.github_add_comment"), \
+         patch.object(orch, "_builder_fix", new_callable=AsyncMock) as mock_builder:
+        healed = await orch._run_quality_gate_with_self_heal(
+            state,
+            "artifact_hygiene",
+            lambda attempt, summary: orch._run_artifact_quality_gate(state, str(tmp_path), attempt, summary),
+            str(tmp_path),
+        )
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "playwright.config.js"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert healed is True
+    assert tracked == ""
+    assert artifact.exists()
+    assert any(g.name == "artifact_hygiene" and not g.passed for g in state.quality_gates)
+    assert any(g.name == "artifact_hygiene" and g.passed for g in state.quality_gates)
+    mock_builder.assert_not_awaited()
+
+def test_artifact_hygiene_rejects_unsafe_untrack_path():
+    orch = Orchestrator()
+    with patch("founderscrew.orchestrator.subprocess.run") as mock_run:
+        ok, summary = orch._untrack_generated_artifacts("repo", ["src/app.js"])
+
+    assert ok is False
+    assert "Refusing to untrack non-generated artifact paths" in summary
+    mock_run.assert_not_called()
+
+def test_artifact_hygiene_reports_git_untrack_failure():
+    orch = Orchestrator()
+    fake_result = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "index is locked"})()
+
+    with patch("founderscrew.orchestrator.subprocess.run", return_value=fake_result):
+        ok, summary = orch._untrack_generated_artifacts("repo", ["playwright.config.js"])
+
+    assert ok is False
+    assert "index is locked" in summary
 
 @pytest.mark.anyio
 async def test_quality_docs_gate_self_heals_then_reruns_tests(temp_db_path):

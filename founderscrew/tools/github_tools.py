@@ -1,9 +1,12 @@
 import os
 import subprocess
+import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from github import Github
 from founderscrew.config import settings
+
+logger = logging.getLogger("founderscrew.github_tools")
 
 def get_github_client() -> Github:
     """Returns an authenticated Github client instance."""
@@ -71,8 +74,12 @@ def github_list_repo_files(repo_name: str, path: str = "", ref: Optional[str] = 
         path: Path within repository (default is root '')
         ref: Git ref (branch name, SHA, tag)
     """
-    g = get_github_client()
-    repo = g.get_repo(repo_name)
+    try:
+        g = get_github_client()
+        repo = g.get_repo(repo_name)
+    except Exception as e:
+        logger.warning(f"Could not access repo {repo_name!r} while listing files: {e}")
+        return []
     
     files = []
     try:
@@ -109,9 +116,9 @@ def github_get_file_content(repo_name: str, path: str, ref: Optional[str] = None
         path: File path within the repository
         ref: Git branch, SHA, or tag
     """
-    g = get_github_client()
-    repo = g.get_repo(repo_name)
     try:
+        g = get_github_client()
+        repo = g.get_repo(repo_name)
         file_content = repo.get_contents(path, ref=ref) if ref else repo.get_contents(path)
         if isinstance(file_content, list):
             return f"Error: Path '{path}' is a directory, not a file."
@@ -128,22 +135,26 @@ def github_search_code(repo_name: str, query: str) -> List[Dict[str, Any]]:
         repo_name: Repository name (e.g. 'owner/repo')
         query: Search term or syntax (e.g. 'def handle_event')
     """
-    g = get_github_client()
-    # Scopes search to the specified repository
-    search_query = f"{query} repo:{repo_name}"
-    results = g.search_code(query=search_query)
-    
-    items = []
-    # Limit results to top 15 matches to avoid token bloat
-    for i, item in enumerate(results):
-        if i >= 15:
-            break
-        items.append({
-            "name": item.name,
-            "path": item.path,
-            "sha": item.sha
-        })
-    return items
+    try:
+        g = get_github_client()
+        # Scopes search to the specified repository
+        search_query = f"{query} repo:{repo_name}"
+        results = g.search_code(query=search_query)
+        
+        items = []
+        # Limit results to top 15 matches to avoid token bloat
+        for i, item in enumerate(results):
+            if i >= 15:
+                break
+            items.append({
+                "name": item.name,
+                "path": item.path,
+                "sha": item.sha
+            })
+        return items
+    except Exception as e:
+        logger.warning(f"GitHub code search failed for {repo_name!r} query {query!r}: {e}")
+        return []
 
 def github_create_branch(repo_name: str, branch_name: str, base_branch: str = "main") -> str:
     """Creates a new branch off a base branch.
