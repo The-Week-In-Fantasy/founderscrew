@@ -2,7 +2,6 @@ import os
 import hmac
 import json
 import hashlib
-import asyncio
 import logging
 from typing import Dict, Any
 from fastapi import APIRouter, Header, Request, HTTPException
@@ -70,10 +69,7 @@ async def github_webhook(
             if label_name == trigger_label:
                 sender = payload.get("sender", {}).get("login", "unknown")
                 logger.info(f"Trigger label '{label_name}' detected on issue #{issue_number}")
-                # Start orchestrator flow asynchronously to return fast response to GitHub
-                asyncio.create_task(
-                    orchestrator.handle_issue_labeled(repo_name, issue_number, sender)
-                )
+                await orchestrator.handle_issue_labeled(repo_name, issue_number, sender)
                 return {"status": "triggered", "session_id": f"{repo_name.replace('/', '_')}_{issue_number}"}
 
     # 2. Handle issue comments (founder approvals)
@@ -89,10 +85,7 @@ async def github_webhook(
             commenter = comment.get("user", {}).get("login")
             comment_body = comment.get("body", "")
             logger.info(f"Comment received on issue #{issue_number} from {commenter}")
-            # Process comment asynchronously
-            asyncio.create_task(
-                orchestrator.handle_comment_created(repo_name, issue_number, comment_body, commenter)
-            )
+            await orchestrator.handle_comment_created(repo_name, issue_number, comment_body, commenter)
             return {"status": "processing_comment"}
             
     return {"status": "ignored"}

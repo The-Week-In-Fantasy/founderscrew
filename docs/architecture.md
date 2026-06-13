@@ -23,10 +23,14 @@ Managed using **Google Agent Development Kit (ADK)**:
 - **DeployerAgent**: Manages PRs, branches, and merges.
 
 ### C. The Interface Layer (Dashboard)
-- **FastAPI Web App (`dashboard/app.py`)**: Serves dashboard pages, config settings forms, manual approvals, and webhook endpoints on a single port.
+- **FastAPI Web App (`dashboard/app.py`)**: Serves dashboard pages, config settings forms, manual approvals, and webhook endpoints on a single port. It records state changes and enqueues workflow jobs; it does not run long-lived agent work inline.
 - **Jinja2 + HTMX**: Renders responsive dark-themed visuals. HTMX polls the server to update the workflow step timeline dynamically as agents make progress, avoiding connection leaks.
 
-### D. The A2A Interoperability Layer
+### D. The Workflow Worker Layer
+- **Persistent Workflow Queue (`workflow_queue.py`)**: Stores stage jobs in SQLite locally or Firestore in cloud deployments.
+- **Worker Process (`worker.py`)**: Claims queued jobs and runs the Orchestrator stages that perform agent calls, git operations, tests, browser automation, screenshots, and PR creation.
+
+### E. The A2A Interoperability Layer
 - Exposes a JSON-RPC 2.0 endpoint at `/api/v1/a2a/qa` mapping parameters to the QA Agent.
 - Serves an Agent Card at `/.well-known/agent-card.json` containing metadata, models, and capabilities.
 
@@ -53,4 +57,4 @@ Founders.crew resolves this by implementing a **state-machine orchestrator**:
    [Deploying (PR Open)] ──► [AWAIT_PR_APPROVAL] ──► [PR Merged] ──► [MERGED / DONE]
 ```
 
-At each suspended gate, the server stops execution and saves state. When a webhook comment or manual click occurs, the Orchestrator reloads state from the database, restores progress, and fires the next agent step.
+At each suspended gate, execution stops and state is saved. When a webhook comment or manual click occurs, the web service updates state and enqueues the next stage. A separate worker process claims that job, reloads state, and runs the next agent step.

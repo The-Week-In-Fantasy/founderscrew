@@ -23,7 +23,7 @@ def test_webhook_github_issues_ignored_label():
     assert resp.json() == {"status": "ignored"}
 
 @patch("founderscrew.webhook.server.settings.get")
-@patch("founderscrew.webhook.server.orchestrator.handle_issue_labeled")
+@patch("founderscrew.webhook.server.orchestrator.handle_issue_labeled", new_callable=AsyncMock)
 def test_webhook_github_issues_labeled_trigger(mock_handle, mock_settings_get):
     mock_settings_get.side_effect = lambda key, default=None: {
         "github.trigger_label": "crew:ready"
@@ -42,9 +42,9 @@ def test_webhook_github_issues_labeled_trigger(mock_handle, mock_settings_get):
     assert resp.status_code == 200
     assert resp.json()["status"] == "triggered"
     assert resp.json()["session_id"] == "owner_repo_100"
-    mock_handle.assert_called_once_with("owner/repo", 100, "founder-bob")
+    mock_handle.assert_awaited_once_with("owner/repo", 100, "founder-bob")
 
-@patch("founderscrew.webhook.server.orchestrator.handle_comment_created")
+@patch("founderscrew.webhook.server.orchestrator.handle_comment_created", new_callable=AsyncMock)
 def test_webhook_github_comment_created(mock_handle):
     resp = client.post(
         "/webhook/github",
@@ -58,7 +58,7 @@ def test_webhook_github_comment_created(mock_handle):
     )
     assert resp.status_code == 200
     assert resp.json() == {"status": "processing_comment"}
-    mock_handle.assert_called_once_with("owner/repo", 100, "approve", "founder-bob")
+    mock_handle.assert_awaited_once_with("owner/repo", 100, "approve", "founder-bob")
 
 def test_webhook_rejects_missing_or_invalid_signature(monkeypatch):
     monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "topsecret")

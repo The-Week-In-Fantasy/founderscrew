@@ -37,6 +37,10 @@ def test_dashboard_run_detail_success(mock_load):
     resp = client.get("/run/sess_123")
     assert resp.status_code == 200
     assert "Issue #1: T" in resp.text
+    assert 'id="restart-stage-select"' in resp.text
+    assert 'id="stage-feedback-form"' in resp.text
+    assert 'id="feedback-stage-select"' in resp.text
+    assert "hx-preserve" in resp.text
 
 @patch("founderscrew.dashboard.app.store.load_state")
 @patch("founderscrew.webhook.server.orchestrator.handle_comment_created", new_callable=AsyncMock)
@@ -55,12 +59,32 @@ def test_dashboard_approve_plan(mock_comment, mock_load):
     
     # Asserts Redirect
     assert resp.status_code == 303 or resp.status_code == 200
-    mock_comment.assert_called_once_with(
+    mock_comment.assert_awaited_once_with(
         repo_name="owner/repo",
         issue_number=42,
         comment_body="approve",
         commenter="dashboard_user"
     )
+
+@patch("founderscrew.dashboard.app.store.delete_state")
+@patch("founderscrew.workflow_queue.WorkflowQueue.delete_session_jobs")
+def test_dashboard_delete_run_purges_queue(mock_delete_jobs, mock_delete_state):
+    resp = client.post("/run/session_123/delete")
+
+    assert resp.status_code == 303 or resp.status_code == 200
+    mock_delete_jobs.assert_called_once_with("session_123")
+    mock_delete_state.assert_called_once_with("session_123")
+
+@patch("founderscrew.webhook.server.orchestrator.reject_stage_with_feedback", new_callable=AsyncMock)
+def test_dashboard_reject_stage_with_feedback(mock_feedback):
+    resp = client.post(
+        "/run/session_123/feedback",
+        data={"target_stage": "qa", "feedback": "Screenshot is blank."},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303 or resp.status_code == 200
+    mock_feedback.assert_awaited_once_with("session_123", "qa", "Screenshot is blank.")
 
 def test_dashboard_settings_get():
     resp = client.get("/settings")

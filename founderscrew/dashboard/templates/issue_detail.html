@@ -219,15 +219,15 @@
 </div>
 
 <!-- Auto-refresh details every 5s if workflow is running -->
-<div id="detail-container" 
-     {% if active_status not in ['merged', 'failed'] %}
-     hx-get="/run/{{ state.session_id }}" 
-     hx-select="#detail-body" 
-     hx-target="#detail-container" 
-     hx-trigger="every 5s"
-     {% endif %}>
+<div id="detail-container">
     
-    <div id="detail-body" class="grid-layout">
+    <div id="detail-body" class="grid-layout"
+         {% if active_status not in ['merged', 'failed', 'await_plan_approval', 'await_qa_approval', 'await_pr_approval'] %}
+         hx-get="/run/{{ state.session_id }}" 
+         hx-select="#detail-body" 
+         hx-swap="outerHTML"
+         hx-trigger="every 5s"
+         {% endif %}>
         <!-- Sidebar Info -->
         <div class="side-info">
             <div class="card">
@@ -274,8 +274,8 @@
                 <div class="panel-header">
                     <div class="panel-title"><i class="fa-solid fa-rotate-left"></i> Restart Stage</div>
                 </div>
-                <form action="/run/{{ state.session_id }}/restart" method="POST">
-                    <select name="target_stage" style="width: 100%; padding: 0.6rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: var(--text-main); font-family: inherit; font-size: 0.85rem; margin-bottom: 0.75rem; cursor: pointer;">
+                <form id="restart-stage-form" action="/run/{{ state.session_id }}/restart" method="POST">
+                    <select id="restart-stage-select" name="target_stage" hx-preserve style="width: 100%; padding: 0.6rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: var(--text-main); font-family: inherit; font-size: 0.85rem; margin-bottom: 0.75rem; cursor: pointer;">
                         <option value="triage">🔍 Triage</option>
                         <option value="planning">📋 Planning</option>
                         <option value="building">🔨 Building</option>
@@ -289,6 +289,30 @@
                 </form>
                 <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
                     Jump back to any stage in the pipeline. Subsequent stages will be cleared and re-run.
+                </p>
+            </div>
+
+            <div class="card" style="border-color: rgba(239, 68, 68, 0.25);">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-message"></i> Reject Stage</div>
+                </div>
+                <form id="stage-feedback-form" action="/run/{{ state.session_id }}/feedback" method="POST">
+                    <select id="feedback-stage-select" name="target_stage" hx-preserve style="width: 100%; padding: 0.6rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: var(--text-main); font-family: inherit; font-size: 0.85rem; margin-bottom: 0.75rem; cursor: pointer;">
+                        <option value="triage">🔍 Triage</option>
+                        <option value="planning">📋 Planning</option>
+                        <option value="building">🔨 Building</option>
+                        <option value="testing">🧪 Testing</option>
+                        <option value="qa">👁️ QA Review</option>
+                        <option value="deploy">🚀 Deploy</option>
+                    </select>
+                    <textarea name="feedback" rows="4" required placeholder="What should change before this stage is accepted?"
+                        style="width: 100%; padding: 0.7rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: var(--text-main); font-family: inherit; font-size: 0.85rem; resize: vertical; margin-bottom: 0.75rem;"></textarea>
+                    <button type="submit" class="btn" style="width: 100%; background: rgba(239, 68, 68, 0.14); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; font-size: 0.85rem;">
+                        <i class="fa-solid fa-arrow-rotate-left"></i> Reject & Rework
+                    </button>
+                </form>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
+                    Feedback is saved to the run and routed through the worker for another pass.
                 </p>
             </div>
             {% endif %}
@@ -307,6 +331,23 @@
                 </div>
                 
                 <p style="margin-bottom: 1.5rem; line-height: 1.6;">{{ state.plan.summary }}</p>
+
+                <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                    <span class="badge badge-info">Risk: {{ state.risk_level }}</span>
+                    <span class="badge {% if state.ui_qa_required %}badge-warning{% else %}badge-success{% endif %}">UI QA: {{ 'Required' if state.ui_qa_required else 'Skipped' }}</span>
+                    <span class="badge {% if state.docs_required %}badge-warning{% else %}badge-success{% endif %}">Docs: {{ 'Required' if state.docs_required else 'Not required' }}</span>
+                </div>
+
+                {% if state.acceptance_criteria %}
+                <div style="margin-bottom: 1.25rem;">
+                    <h4 style="margin-bottom: 0.5rem;">Definition of Done</h4>
+                    <ul style="margin-left: 1.25rem; color: var(--text-muted); line-height: 1.6;">
+                        {% for criterion in state.acceptance_criteria %}
+                        <li>{{ criterion }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
                 
                 <div class="step-list">
                     {% for step in state.plan.steps %}
@@ -344,18 +385,53 @@
                                 <button type="submit" class="btn" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171;">
                                     <i class="fa-solid fa-pen-to-square"></i> {% if active_status == 'failed' %}Submit Feedback & Replan{% else %}Request Changes{% endif %}
                                 </button>
+                                {% if not state.plan.approved %}
+                                <button type="submit" form="approve_plan_form_{{ state.session_id }}" class="btn">
+                                    <i class="fa-solid fa-check"></i> Approve & Run
+                                </button>
+                                {% endif %}
                             </div>
                         </form>
                         
                         {% if not state.plan.approved %}
-                        <div style="display: flex; justify-content: flex-end; border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
-                            <form action="/run/{{ state.session_id }}/approve" method="POST">
-                                <input type="hidden" name="step_type" value="plan">
-                                <button type="submit" class="btn"><i class="fa-solid fa-check"></i> Approve & Run</button>
-                            </form>
-                        </div>
+                        <form id="approve_plan_form_{{ state.session_id }}" action="/run/{{ state.session_id }}/approve" method="POST" style="display: none;">
+                            <input type="hidden" name="step_type" value="plan">
+                        </form>
                         {% endif %}
                     </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if state.quality_gates %}
+            <div class="card">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-shield-halved"></i> Quality Gates</div>
+                    <span class="badge {% if state.quality_gates and state.quality_gates[-1].passed %}badge-success{% else %}badge-warning{% endif %}">
+                        {{ state.final_evidence_summary.split('\n')[0].replace('Quality status: ', '') if state.final_evidence_summary else 'In Progress' }}
+                    </span>
+                </div>
+                <div class="step-list">
+                    {% for gate in state.quality_gates %}
+                    <div class="step-item">
+                        <div class="step-header">
+                            <span class="step-num">{{ gate.name }}</span>
+                            <span class="badge {% if gate.passed %}badge-success{% else %}badge-danger{% endif %}">
+                                {% if gate.passed %}Passed{% else %}Failed{% endif %}
+                            </span>
+                        </div>
+                        {% if gate.command %}<div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;"><code>{{ gate.command }}</code> · attempt {{ gate.attempt }}</div>{% endif %}
+                        <div class="terminal-view">{{ gate.output or "No output captured." }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if state.artifacts %}
+                <div style="margin-top: 1rem; color: var(--text-muted); font-size: 0.9rem;">
+                    <strong>Artifacts:</strong>
+                    {% for artifact in state.artifacts[-8:] %}
+                    <div><code>{{ artifact.kind }}</code>: {{ artifact.path }}</div>
+                    {% endfor %}
                 </div>
                 {% endif %}
             </div>
@@ -384,6 +460,15 @@
             </div>
             {% endif %}
 
+            {% if state.final_evidence_summary %}
+            <div class="card">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-clipboard-list"></i> Final Evidence Summary</div>
+                </div>
+                <div style="white-space: pre-wrap; line-height: 1.5; color: var(--text-muted);">{{ state.final_evidence_summary }}</div>
+            </div>
+            {% endif %}
+
             <!-- QA Report -->
             {% if state.qa_report %}
             <div class="card">
@@ -394,7 +479,7 @@
                     </span>
                 </div>
                 
-                <p style="line-height: 1.6; margin-bottom: 1rem;">{{ state.qa_report.summary }}</p>
+                <div style="line-height: 1.6; margin-bottom: 1rem; white-space: pre-wrap;">{{ state.qa_report.summary | replace('**', '') }}</div>
 
                 {% if state.qa_report.screenshots %}
                 <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
@@ -409,15 +494,29 @@
                 {% endif %}
 
                 {% if not state.qa_report.approved and active_status == 'await_qa_approval' %}
-                <div class="approval-banner">
-                    <div class="approval-text">
+                <div class="approval-banner" style="align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
+                    <div class="approval-text" style="flex: 1 1 240px;">
                         <h4>QA Validation Approval</h4>
-                        <p style="color: var(--text-muted); font-size: 0.9rem;">Review the QA findings. Approve to proceed with opening the Pull Request.</p>
+                        <p style="color: var(--text-muted); font-size: 0.9rem;">Review the QA findings. Approve to proceed with opening the Pull Request, or reject with feedback for another build pass.</p>
                     </div>
-                    <form action="/run/{{ state.session_id }}/approve" method="POST">
-                        <input type="hidden" name="step_type" value="qa">
-                        <button type="submit" class="btn"><i class="fa-solid fa-check"></i> Approve & Deploy</button>
-                    </form>
+                    <div style="flex: 1 1 320px;">
+                        <form action="/run/{{ state.session_id }}/feedback" method="POST" style="margin-bottom: 0.75rem;">
+                            <input type="hidden" name="target_stage" value="qa">
+                            <textarea name="feedback" rows="3" required placeholder="Describe what needs to change in the visual result..."
+                                style="width: 100%; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: var(--text-main); font-family: inherit; font-size: 0.9rem; resize: vertical; margin-bottom: 0.75rem;"></textarea>
+                            <div style="display: flex; gap: 0.75rem;">
+                                <button type="submit" class="btn" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171;">
+                                    <i class="fa-solid fa-arrow-rotate-left"></i> Reject & Rework
+                                </button>
+                                <button type="submit" form="approve_qa_form_{{ state.session_id }}" class="btn">
+                                    <i class="fa-solid fa-check"></i> Approve & Deploy
+                                </button>
+                            </div>
+                        </form>
+                        <form id="approve_qa_form_{{ state.session_id }}" action="/run/{{ state.session_id }}/approve" method="POST" style="display: none;">
+                            <input type="hidden" name="step_type" value="qa">
+                        </form>
+                    </div>
                 </div>
                 {% endif %}
             </div>

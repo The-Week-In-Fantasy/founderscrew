@@ -109,6 +109,17 @@ founders-crew start
 ```
 Go to `http://localhost:8080` to access the dashboard!
 
+### 5. Start the Workflow Worker
+Run agent workflows in a separate process so the dashboard stays responsive:
+```bash
+founders-crew worker
+```
+
+For local smoke tests or one-off queue draining:
+```bash
+founders-crew worker --once
+```
+
 ---
 
 ## 🐳 Deploying to Google Cloud Run
@@ -127,7 +138,7 @@ docker push us-central1-docker.pkg.dev/YOUR_PROJECT/founders-crew/app:latest
 ```
 
 ### 2. Deploy to Cloud Run
-Deploy with Firestore state storage:
+Deploy the web service with Firestore state storage:
 ```bash
 gcloud run deploy founders-crew \
   --image us-central1-docker.pkg.dev/YOUR_PROJECT/founders-crew/app:latest \
@@ -135,6 +146,18 @@ gcloud run deploy founders-crew \
   --allow-unauthenticated \
   --set-env-vars FOUNDERSCREW_STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT
 ```
+
+Deploy the workflow worker from the same image as a Cloud Run worker pool:
+```bash
+gcloud run worker-pools deploy founderscrew-worker \
+  --image us-central1-docker.pkg.dev/YOUR_PROJECT/founders-crew/app:latest \
+  --region us-central1 \
+  --command founders-crew \
+  --args worker \
+  --set-env-vars FOUNDERSCREW_STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT
+```
+
+The web service receives dashboard and webhook traffic. The worker pool runs queued agent workflows, tests, browser automation, and PR creation without blocking the web UI.
 
 ---
 

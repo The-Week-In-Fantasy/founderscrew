@@ -46,6 +46,14 @@ class StateStore:
             )
             """
         )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS deleted_workflow_sessions (
+                session_id TEXT PRIMARY KEY,
+                deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
         conn.commit()
         conn.close()
 
@@ -67,6 +75,10 @@ class StateStore:
 
     def save_state(self, state: WorkflowStateModel) -> None:
         """Saves a state to the active backend."""
+        if self.is_state_deleted(state.session_id):
+            logger.info(f"Skipping save for deleted workflow session {state.session_id}.")
+            return
+
         if self.backend == "firestore":
             try:
                 doc_ref = self.db.collection(self.collection_name).document(state.session_id)
@@ -198,6 +210,9 @@ class StateStore:
         if self.backend == "firestore":
             try:
                 self.db.collection(self.collection_name).document(session_id).delete()
+                self.db.collection(f"{self.collection_name}_deleted").document(session_id).set(
+                    {"session_id": session_id}
+                )
                 return
             except Exception as e:
                 logger.error(f"Error deleting from Firestore: {e}. Falling back to SQLite.")
@@ -205,6 +220,44 @@ class StateStore:
         conn = sqlite3.connect(str(self.sqlite_db_path))
         cursor = conn.cursor()
         cursor.execute("DELETE FROM workflow_states WHERE session_id = ?", (session_id,))
+        cursor.execute(
+            """
+            INSERT INTO deleted_workflow_sessions (session_id, deleted_at)
+            VALUES (?, CURRENT_TIMESTAMP)
+            ON CONFLICT(session_id) DO UPDATE SET deleted_at=CURRENT_TIMESTAMP
+            """,
+            (session_id,)
+        )
         conn.commit()
         conn.close()
 
+    def clear_deleted_state(self, session_id: str) -> None:
+        """Allows a deliberately re-triggered workflow to reuse a deleted session id."""
+        if self.backend == "firestore":
+            try:
+                self.db.collection(f"{self.collection_name}_deleted").document(session_id).delete()
+                return
+            except Exception as e:
+                logger.error(f"Error clearing Firestore delete marker: {e}. Falling back to SQLite.")
+
+        conn = sqlite3.connect(str(self.sqlite_db_path))
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM deleted_workflow_sessions WHERE session_id = ?", (session_id,))
+        conn.commit()
+        conn.close()
+
+    def is_state_deleted(self, session_id: str) -> bool:
+        """Returns True when a workflow was deleted and should not be resurrected."""
+        if self.backend == "firestore":
+            try:
+                doc = self.db.collection(f"{self.collection_name}_deleted").document(session_id).get()
+                return bool(doc.exists)
+            except Exception as e:
+                logger.error(f"Error checking Firestore delete marker: {e}. Falling back to SQLite.")
+
+        conn = sqlite3.connect(str(self.sqlite_db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM deleted_workflow_sessions WHERE session_id = ?", (session_id,))
+        deleted = cursor.fetchone() is not None
+        conn.close()
+        return deleted

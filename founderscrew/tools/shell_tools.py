@@ -6,6 +6,7 @@ import logging
 import subprocess
 import urllib.request
 from typing import List, Dict, Any, Union, Optional, Tuple
+from founderscrew.config import settings
 
 logger = logging.getLogger("founderscrew.shell")
 
@@ -14,8 +15,10 @@ SAFE_COMMAND_PATTERNS = [
     r"^pytest(?:\s+.*)?$",
     r"^python\s+-m\s+pytest(?:\s+.*)?$",
     r"^npm\s+(?:test|run\s+test)(?:\s+.*)?$",
+    r"^npm\s+run\s+(?:lint|typecheck|type-check|check)(?:\s+.*)?$",
     r"^npm\s+(?:install|ci)(?:\s+.*)?$",
-    r"^npx\s+(?:playwright\s+test|jest|vitest)(?:\s+.*)?$",
+    r"^npx\s+(?:playwright\s+(?:test|install)(?:\s+.*)?|jest|vitest|tsc\s+--noEmit)(?:\s+.*)?$",
+    r"^ruff\s+check(?:\s+.*)?$",
     r"^node\s+.*$",
     r"^pip\s+install\s+-e\s+\.(?:\s+.*)?$",
     r"^pip\s+install\s+-r\s+.*$",
@@ -100,8 +103,13 @@ def run_safe_shell_command(command: Union[str, List[str]], cwd: str, timeout: in
             "returncode": -3
         }
 
-def start_dev_server(workdir: str, command: Optional[str] = None, port: int = 3001,
-                     boot_timeout: int = 90) -> Tuple[Optional[subprocess.Popen], Optional[str]]:
+def start_dev_server(
+    workdir: str,
+    command: Optional[str] = None,
+    port: int = 3001,
+    boot_timeout: int = 90,
+    render_settle_seconds: Optional[float] = None,
+) -> Tuple[Optional[subprocess.Popen], Optional[str]]:
     """Starts the project's dev server so QA can screenshot a real running app.
 
     Returns (process, url) once the server answers HTTP, or (None, None) if it
@@ -111,6 +119,11 @@ def start_dev_server(workdir: str, command: Optional[str] = None, port: int = 30
     url = f"http://localhost:{port}"
     env = os.environ.copy()
     env.update({"CI": "1", "PORT": str(port), "BROWSER": "none"})
+    if render_settle_seconds is None:
+        try:
+            render_settle_seconds = float(settings.get("qa.dev_server_ready_delay_seconds", 5) or 0)
+        except (TypeError, ValueError):
+            render_settle_seconds = 5
     try:
         proc = subprocess.Popen(
             command, shell=True, cwd=workdir, env=env,
@@ -127,6 +140,12 @@ def start_dev_server(workdir: str, command: Optional[str] = None, port: int = 30
             return None, None
         try:
             with urllib.request.urlopen(url, timeout=2):
+                settle_deadline = time.monotonic() + max(0.0, render_settle_seconds)
+                while time.monotonic() < settle_deadline:
+                    if proc.poll() is not None:
+                        logger.warning(f"Dev server '{command}' exited during render settle with code {proc.returncode}.")
+                        return None, None
+                    time.sleep(min(0.25, settle_deadline - time.monotonic()))
                 return proc, url
         except Exception:
             time.sleep(2)

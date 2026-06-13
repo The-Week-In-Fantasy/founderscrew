@@ -13,7 +13,7 @@ from founderscrew.tools.github_tools import (
 )
 from founderscrew.tools.coding_adapter import CodingToolAdapter
 from founderscrew.tools.shell_tools import run_safe_shell_command
-from founderscrew.tools.screenshot_tools import capture_screenshot, compare_screenshots
+from founderscrew.tools.screenshot_tools import capture_screenshot, compare_screenshots, capture_interactive_screenshot
 from founderscrew.tools.coderabbit_tools import get_coderabbit_suggestions
 from founderscrew.tools.search_tools import google_search
 
@@ -32,6 +32,7 @@ __all__ = [
     "CodingToolAdapter",
     "run_safe_shell_command",
     "capture_screenshot",
+    "capture_interactive_screenshot",
     "compare_screenshots",
     "get_coderabbit_suggestions",
     "google_search",

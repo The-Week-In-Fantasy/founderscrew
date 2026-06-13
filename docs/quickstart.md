@@ -69,9 +69,16 @@ Launch the Webhook & Dashboard server:
 founders-crew start
 ```
 
+In a second terminal, start the workflow worker:
+
+```bash
+founders-crew worker
+```
+
 This starts a server on `http://localhost:8080` (or your configured port):
 - **Dashboard**: Track active tasks, see planning details, and review code fixes.
 - **Webhook**: Receives issue update notifications from GitHub.
+- **Worker**: Runs queued agent workflows, tests, browser automation, and PR creation outside the web process.
 
 ---
 

@@ -24,11 +24,12 @@ def js_repo(tmp_path):
     (root / "tests" / "integration").mkdir(parents=True)
     (root / "tests" / "unit").mkdir(parents=True)
     (root / "src").mkdir()
+    (root / "README.md").write_text("# Demo", encoding="utf-8")
     (root / "package.json").write_text(json.dumps({
         "name": "demo",
-        "scripts": {"test": "playwright test", "dev": "vite", "build": "vite build"},
+        "scripts": {"test": "playwright test", "dev": "vite", "build": "vite build", "lint": "eslint .", "typecheck": "tsc --noEmit"},
         "dependencies": {"react": "^19.0.0", "vite": "^5.0.0"},
-        "devDependencies": {"@playwright/test": "^1.40.0"}
+        "devDependencies": {"@playwright/test": "^1.40.0", "typescript": "^5.0.0"}
     }), encoding="utf-8")
     (root / "tests" / "integration" / "01-journey.spec.js").write_text("// test", encoding="utf-8")
     (root / "tests" / "unit" / "calc.test.mjs").write_text("// test", encoding="utf-8")
@@ -45,6 +46,9 @@ def test_build_repo_profile_js(js_repo):
     assert "*.spec.js" in profile["test_naming"]
     assert "*.test.mjs" in profile["test_naming"]
     assert "react" in profile["frameworks"]
+    assert profile["lint_command"] == "npm run lint"
+    assert profile["typecheck_command"] == "npm run typecheck"
+    assert "README.md" in profile["docs_paths"]
 
 def test_repo_memory_roundtrip_and_lessons_survive(memory_store, js_repo):
     # First call with a workdir builds and persists the profile
@@ -62,6 +66,8 @@ def test_repo_memory_roundtrip_and_lessons_survive(memory_store, js_repo):
     text = format_repo_memory(memory)
     assert "REPO PROFILE" in text
     assert "npm test" in text
+    assert "npm run lint" in text
+    assert "npm run typecheck" in text
     assert "LESSONS FROM PREVIOUS WORK" in text
     assert "PLAYWRIGHT_BASE_URL" in text
 

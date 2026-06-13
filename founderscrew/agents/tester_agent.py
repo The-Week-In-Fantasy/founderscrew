@@ -1,4 +1,5 @@
 import re
+import json
 from pathlib import Path
 from typing import Dict, Any
 from google.adk.agents import LlmAgent
@@ -7,6 +8,38 @@ from founderscrew.tools import run_safe_shell_command, github_clone_or_pull, cap
 from founderscrew.config import settings
 
 _TEST_FILE_EXT = re.compile(r"\.(m?[jt]sx?|py)$")
+
+def _workspace_uses_playwright(workdir: str, command: str) -> bool:
+    if "playwright" in command.lower():
+        return True
+
+    package_path = Path(workdir) / "package.json"
+    if not package_path.exists():
+        return False
+
+    try:
+        pkg = json.loads(package_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+
+    dependency_names = {
+        **(pkg.get("dependencies") or {}),
+        **(pkg.get("devDependencies") or {}),
+    }
+    if "playwright" in dependency_names or "@playwright/test" in dependency_names:
+        return True
+
+    scripts = pkg.get("scripts") or {}
+    return any("playwright" in str(script).lower() for script in scripts.values())
+
+def _has_local_playwright_browsers(workdir: str) -> bool:
+    local_browsers = Path(workdir) / "node_modules" / "playwright-core" / ".local-browsers"
+    if not local_browsers.exists():
+        return False
+    try:
+        return any(local_browsers.iterdir())
+    except Exception:
+        return False
 
 def _resolve_test_paths(command: str, workdir: str) -> str:
     """Rewrites test file paths in the command that don't exist on disk.
@@ -43,9 +76,11 @@ def run_test_command(command: str, repository: str) -> Dict[str, Any]:
         workdir = github_clone_or_pull(repository)
         
         # Auto-install dependencies based on the project type if needed
+        playwright_env = {"PLAYWRIGHT_BROWSERS_PATH": "0"}
+
         if command.startswith("npm") or (Path(workdir) / "package.json").exists():
             if not (Path(workdir) / "node_modules").exists():
-                install_res = run_safe_shell_command("npm install", workdir)
+                install_res = run_safe_shell_command("npm install", workdir, extra_env=playwright_env)
                 if not install_res["success"]:
                     return {
                         "success": False,
@@ -66,12 +101,28 @@ def run_test_command(command: str, repository: str) -> Dict[str, Any]:
                         "returncode": install_res["returncode"]
                     }
 
+        if _workspace_uses_playwright(workdir, command) and not _has_local_playwright_browsers(workdir):
+            install_res = run_safe_shell_command(
+                "npx playwright install chromium",
+                workdir,
+                timeout=300,
+                extra_env=playwright_env,
+            )
+            if not install_res["success"]:
+                return {
+                    "success": False,
+                    "stdout": install_res["stdout"],
+                    "stderr": f"Playwright browser installation failed (npx playwright install chromium):\n{install_res['stderr']}",
+                    "returncode": install_res["returncode"]
+                }
+
         # Isolation environment: forces Playwright to spin up its own Vite
         # dev server on an isolated port instead of reusing the user's live one
         test_env = {
             "CI": "1",
             "PORT": "3001",
             "PLAYWRIGHT_BASE_URL": "http://localhost:3001",
+            "PLAYWRIGHT_BROWSERS_PATH": "0",
         }
 
         import logging

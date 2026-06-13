@@ -258,7 +258,8 @@ class SetupWizard:
             settings.save()
             console.print("\n[bold green]🎉 Setup completed successfully![/bold green]")
             console.print("Configuration saved to ~/.founderscrew/config.yaml")
-            console.print("\nYou can now start the DevOps team using:")
-            console.print("👉 [bold cyan]founders-crew start[/bold cyan]\n")
+            console.print("\nStart the dashboard and workflow worker in separate terminals:")
+            console.print("👉 [bold cyan]founders-crew start[/bold cyan]")
+            console.print("👉 [bold cyan]founders-crew worker[/bold cyan]\n")
         else:
             console.print("[yellow]Setup cancelled. Settings were not saved permanently.[/yellow]")

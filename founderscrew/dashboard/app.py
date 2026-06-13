@@ -104,11 +104,19 @@ async def agent_card():
 async def get_screenshot(filename: str):
     """Serves QA screenshots captured during workflow runs."""
     from fastapi.responses import FileResponse
+    safe_name = Path(filename).name  # strip any path components
     shots_dir = Path.home() / ".founderscrew" / "screenshots"
-    file_path = shots_dir / Path(filename).name  # strip any path components
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Screenshot not found")
-    return FileResponse(str(file_path), media_type="image/png")
+    # Check top-level directory first
+    file_path = shots_dir / safe_name
+    if file_path.exists():
+        return FileResponse(str(file_path), media_type="image/png")
+    # Search session subdirectories for interactive screenshots
+    for subdir in shots_dir.iterdir():
+        if subdir.is_dir():
+            candidate = subdir / safe_name
+            if candidate.exists():
+                return FileResponse(str(candidate), media_type="image/png")
+    raise HTTPException(status_code=404, detail="Screenshot not found")
 
 @app.get("/", response_class=HTMLResponse, dependencies=[Depends(auth_required)])
 async def home(request: Request):
@@ -169,10 +177,7 @@ async def trigger_run(issue_number: int = Form(...)):
         raise HTTPException(status_code=400, detail="Repository not configured in settings")
         
     from founderscrew.webhook.server import orchestrator
-    import asyncio
-    asyncio.create_task(
-        orchestrator.handle_issue_labeled(repo, issue_number, "dashboard_user")
-    )
+    await orchestrator.handle_issue_labeled(repo, issue_number, "dashboard_user")
     
     session_id = f"{repo.replace('/', '_')}_{issue_number}"
     return RedirectResponse(url=f"/run/{session_id}", status_code=303)
@@ -187,6 +192,8 @@ async def retry_run(session_id: str):
 @app.post("/run/{session_id}/delete", response_class=RedirectResponse, dependencies=[Depends(auth_required)])
 async def delete_run(session_id: str):
     """Deletes a run from the dashboard and database."""
+    from founderscrew.workflow_queue import WorkflowQueue
+    WorkflowQueue().delete_session_jobs(session_id)
     store.delete_state(session_id)
     return RedirectResponse(url="/", status_code=303)
 
@@ -195,6 +202,17 @@ async def replan_run(session_id: str, feedback: str = Form("")):
     """Re-runs the planner with user feedback for plan refinement."""
     from founderscrew.webhook.server import orchestrator
     await orchestrator.replan_with_feedback(session_id, feedback)
+    return RedirectResponse(url=f"/run/{session_id}", status_code=303)
+
+@app.post("/run/{session_id}/feedback", response_class=RedirectResponse, dependencies=[Depends(auth_required)])
+async def reject_stage_run(
+    session_id: str,
+    target_stage: str = Form(...),
+    feedback: str = Form(""),
+):
+    """Rejects a stage output and queues rework with founder feedback."""
+    from founderscrew.webhook.server import orchestrator
+    await orchestrator.reject_stage_with_feedback(session_id, target_stage, feedback)
     return RedirectResponse(url=f"/run/{session_id}", status_code=303)
 
 @app.post("/run/{session_id}/restart", response_class=RedirectResponse, dependencies=[Depends(auth_required)])

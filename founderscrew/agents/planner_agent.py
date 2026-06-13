@@ -23,12 +23,23 @@ Your plan must be clear and structured. List:
    - Step number
    - Action description (what needs to be modified/created)
    - Files affected (relative paths)
-3. A testing strategy detailing what automated test commands to run.
+3. Acceptance criteria that prove the issue is resolved.
+4. A testing strategy detailing what automated test commands to run.
+5. Quality contract fields:
+   - risk_level: "low", "medium", or "high"
+   - ui_qa_required: boolean
+   - docs_required: boolean
+   - expected_test_commands: list of shell commands
 
 Format the plan in clear markdown. Ensure it has a structured JSON representation at the end for automated step parsing, e.g.:
 ```json
 {
   "summary": "Fixes import error in main.py by adding missing dependencies.",
+  "acceptance_criteria": ["Importing main.py succeeds", "A targeted regression test covers the import path"],
+  "risk_level": "low",
+  "ui_qa_required": false,
+  "docs_required": false,
+  "expected_test_commands": ["pytest tests/test_issue_123.py"],
   "steps": [
     {
       "step_number": 1,

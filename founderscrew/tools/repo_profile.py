@@ -82,7 +82,10 @@ def build_repo_profile(repo_name: str, workdir: str) -> Dict[str, Any]:
         "scripts": {},
         "test_framework": None,
         "test_command": None,
+        "lint_command": None,
+        "typecheck_command": None,
         "dev_server_command": None,
+        "docs_paths": [],
     }
 
     pkg_file = root / "package.json"
@@ -96,7 +99,7 @@ def build_repo_profile(repo_name: str, workdir: str) -> Dict[str, Any]:
 
         scripts = pkg.get("scripts", {}) or {}
         profile["scripts"] = {k: v for k, v in scripts.items()
-                              if k in ("test", "dev", "start", "build", "preview", "lint")}
+                              if k in ("test", "dev", "start", "build", "preview", "lint", "typecheck", "type-check", "check")}
 
         deps = {**(pkg.get("dependencies") or {}), **(pkg.get("devDependencies") or {})}
         known = ["react", "vue", "svelte", "next", "vite", "tailwindcss",
@@ -119,6 +122,13 @@ def build_repo_profile(repo_name: str, workdir: str) -> Dict[str, Any]:
             profile["test_framework"] = "jest"
         if "test" in scripts:
             profile["test_command"] = "npm test"
+        if "lint" in scripts:
+            profile["lint_command"] = "npm run lint"
+        type_script = next((name for name in ("typecheck", "type-check") if name in scripts), None)
+        if type_script:
+            profile["typecheck_command"] = f"npm run {type_script}"
+        elif "typescript" in deps or "tsc" in str(scripts.get("check", "")):
+            profile["typecheck_command"] = "npx tsc --noEmit"
 
         dev_script = scripts.get("dev") or scripts.get("start") or ""
         if "vite" in dev_script or "vite" in deps:
@@ -129,6 +139,19 @@ def build_repo_profile(repo_name: str, workdir: str) -> Dict[str, Any]:
         if not profile["test_command"]:
             profile["test_framework"] = profile["test_framework"] or "pytest"
             profile["test_command"] = "pytest"
+        pyproject_text = ""
+        try:
+            pyproject_text = (root / "pyproject.toml").read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+        if (root / "ruff.toml").exists() or "ruff" in pyproject_text:
+            profile["lint_command"] = profile["lint_command"] or "ruff check ."
+
+    docs_paths = []
+    for candidate in ("README.md", "docs", "documentation"):
+        if (root / candidate).exists():
+            docs_paths.append(candidate)
+    profile["docs_paths"] = docs_paths
 
     profile.update(_scan_test_layout(root))
 
@@ -200,6 +223,12 @@ def format_repo_memory(memory: Dict[str, Any]) -> str:
             lines.append(f"- npm scripts: {scripts}")
         if profile.get("test_framework") or profile.get("test_command"):
             lines.append(f"- Tests: framework={profile.get('test_framework') or 'unknown'}, run with: {profile.get('test_command') or 'unknown'}")
+        if profile.get("lint_command"):
+            lines.append(f"- Lint: {profile['lint_command']}")
+        if profile.get("typecheck_command"):
+            lines.append(f"- Type-check: {profile['typecheck_command']}")
+        if profile.get("docs_paths"):
+            lines.append(f"- Docs: {', '.join(profile['docs_paths'])}")
         if profile.get("test_dirs"):
             naming = f" (naming: {', '.join(profile.get('test_naming') or [])})" if profile.get("test_naming") else ""
             lines.append(f"- Test locations: {', '.join(profile['test_dirs'])}{naming}")

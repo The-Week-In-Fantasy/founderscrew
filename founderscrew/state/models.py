@@ -50,6 +50,20 @@ class TestResultsModel(BaseModel):
     coverage: Optional[float] = 0.0
     screenshot_paths: List[str] = []
 
+class QualityGateResult(BaseModel):
+    name: str
+    command: Optional[str] = ""
+    passed: bool
+    output: Optional[str] = ""
+    attempt: int = 1
+    artifact_paths: List[str] = Field(default_factory=list)
+    remediation_summary: Optional[str] = ""
+
+class WorkflowArtifact(BaseModel):
+    kind: str
+    path: str
+    description: Optional[str] = ""
+
 class QAReportModel(BaseModel):
     passed: bool
     summary: str
@@ -63,6 +77,16 @@ class WorkflowStateModel(BaseModel):
     status: WorkflowStatus = WorkflowStatus.TRIAGE
     branch_name: Optional[str] = ""
     test_command: Optional[str] = None
+    modified_files: List[str] = Field(default_factory=list)
+    build_summaries: List[str] = Field(default_factory=list)
+    test_failure_history: List[str] = Field(default_factory=list)
+    acceptance_criteria: List[str] = Field(default_factory=list)
+    quality_gates: List[QualityGateResult] = Field(default_factory=list)
+    artifacts: List[WorkflowArtifact] = Field(default_factory=list)
+    docs_required: bool = False
+    ui_qa_required: bool = True
+    risk_level: str = "medium"
+    final_evidence_summary: str = ""
     plan: Optional[ImplementationPlanModel] = None
     test_results: Optional[TestResultsModel] = None
     qa_report: Optional[QAReportModel] = None

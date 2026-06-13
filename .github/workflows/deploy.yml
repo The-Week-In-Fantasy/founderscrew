@@ -10,6 +10,7 @@ env:
   GAR_LOCATION: us-central1
   REPOSITORY: founderscrew
   SERVICE: founderscrew
+  WORKER_POOL: founderscrew-worker
   REGION: us-central1
 
 jobs:
@@ -53,10 +54,21 @@ jobs:
           image: us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
           env_vars: |
             FOUNDERSCREW_STORAGE_BACKEND=firestore
+            GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }}
             GITHUB_TOKEN=${{ secrets.GH_TOKEN }}
             GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+
+      - name: Deploy Workflow Worker Pool
+        run: |
+          gcloud run worker-pools deploy "${{ env.WORKER_POOL }}" \
+            --image "$IMAGE" \
+            --region "${{ env.REGION }}" \
+            --command founders-crew \
+            --args worker \
+            --set-env-vars FOUNDERSCREW_STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }},GITHUB_TOKEN=${{ secrets.GH_TOKEN }},GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
 
       - name: Show Deploy Output
         run: |
           echo "Service deployed successfully!"
+          echo "Worker pool deployed successfully!"
           echo "URL: ${{ steps.deploy.outputs.url }}"

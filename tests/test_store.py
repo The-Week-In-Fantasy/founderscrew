@@ -60,22 +60,48 @@ def test_sqlite_store_flow(temp_db_path, dummy_state):
             assert len(states) == 1
             assert states[0].session_id == "session_123"
 
+def test_sqlite_delete_prevents_stale_worker_resurrection(temp_db_path, dummy_state):
+    """A deleted dashboard run must not reappear when an in-flight worker saves stale state."""
+    with patch.dict(os.environ, {"FOUNDERSCREW_STORAGE_BACKEND": "sqlite"}):
+        with patch("founderscrew.config.settings.get", return_value=temp_db_path):
+            store = StateStore()
+            store.save_state(dummy_state)
+            store.delete_state(dummy_state.session_id)
+
+            assert store.load_state(dummy_state.session_id) is None
+            assert store.is_state_deleted(dummy_state.session_id) is True
+
+            dummy_state.status = WorkflowStatus.PLANNING
+            store.save_state(dummy_state)
+            assert store.load_state(dummy_state.session_id) is None
+
+            store.clear_deleted_state(dummy_state.session_id)
+            store.save_state(dummy_state)
+            assert store.load_state(dummy_state.session_id).status == WorkflowStatus.PLANNING
+
 def test_firestore_store_flow(dummy_state):
     """Verifies Firestore flow using mocked Firestore client."""
     with patch.dict(os.environ, {"FOUNDERSCREW_STORAGE_BACKEND": "firestore"}):
         # Mock the firestore client and import
         mock_client = MagicMock()
         mock_collection = MagicMock()
+        mock_deleted_collection = MagicMock()
         mock_doc = MagicMock()
+        mock_deleted_doc = MagicMock()
         
-        mock_client.collection.return_value = mock_collection
+        mock_client.collection.side_effect = lambda name: mock_deleted_collection if name.endswith("_deleted") else mock_collection
         mock_collection.document.return_value = mock_doc
+        mock_deleted_collection.document.return_value = mock_deleted_doc
         
         # When doc.get() is called, return an exists=True mock document
         mock_snapshot = MagicMock()
         mock_snapshot.exists = True
         mock_snapshot.to_dict.return_value = json.loads(dummy_state.model_dump_json())
         mock_doc.get.return_value = mock_snapshot
+
+        mock_deleted_snapshot = MagicMock()
+        mock_deleted_snapshot.exists = False
+        mock_deleted_doc.get.return_value = mock_deleted_snapshot
         
         # Mock stream() to return the snapshot
         mock_collection.stream.return_value = [mock_snapshot]
