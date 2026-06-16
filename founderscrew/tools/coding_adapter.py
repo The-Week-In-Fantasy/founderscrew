@@ -10,6 +10,17 @@ from founderscrew.config import settings
 
 logger = logging.getLogger("founderscrew.coding_adapter")
 
+_CLI_HEALTH_FAILURES: Dict[str, str] = {}
+
+_PERSISTENT_CLI_FAILURE_PATTERNS = {
+    "gemini": [
+        ("SERVICE_DISABLED", "Gemini CLI Code Assist API is disabled"),
+        ("cloudaicompanion.googleapis.com", "Gemini CLI Code Assist API is disabled"),
+        ("IDEClient] Directory mismatch", "Gemini CLI IDE workspace mismatch"),
+    ],
+}
+
+
 class CodingToolAdapter:
     """Dispatches coding instructions to either local CLI tools or LLM APIs using a 3-tier fallback system."""
     
@@ -45,8 +56,18 @@ class CodingToolAdapter:
                 logger.info(f"Attempting coding task using {tool} CLI (Tier {i+1}/{len(cli_tiers)})...")
                 return self._execute_cli(tool, instruction, files, workdir)
             except Exception as e:
-                logger.info(f"Coding CLI tool {tool} (Tier {i+1}) failed: {e}")
-                last_error = str(e)
+                error_text = str(e)
+                persistent_reason = self._persistent_cli_failure_reason(tool, error_text)
+                if persistent_reason:
+                    _CLI_HEALTH_FAILURES[tool] = persistent_reason
+                    logger.warning(
+                        f"Coding CLI tool {tool} disabled for this process: {persistent_reason}. "
+                        "Future attempts will skip this tier until the process restarts."
+                    )
+                    last_error = persistent_reason
+                else:
+                    logger.info(f"Coding CLI tool {tool} (Tier {i+1}) failed: {e}")
+                    last_error = error_text
                 
         # If all CLI tools fail, fall back to API mode automatically
         logger.warning("All coding CLI tiers failed. Falling back to direct API mode execution...")
@@ -56,6 +77,8 @@ class CodingToolAdapter:
             raise RuntimeError(f"All coding tools and API fallbacks failed. Last CLI error: {last_error}. API error: {api_err}")
 
     def _cli_unavailable_reason(self, tool: str) -> Optional[str]:
+        if tool in _CLI_HEALTH_FAILURES:
+            return _CLI_HEALTH_FAILURES[tool]
         executable = {
             "claude": "claude",
             "cursor": "cursor",
@@ -66,6 +89,12 @@ class CodingToolAdapter:
             return f"Unknown CLI tool: {tool}"
         if not shutil.which(executable):
             return f"{executable} executable was not found on PATH"
+        return None
+
+    def _persistent_cli_failure_reason(self, tool: str, error_text: str) -> Optional[str]:
+        for marker, reason in _PERSISTENT_CLI_FAILURE_PATTERNS.get(tool, []):
+            if marker in (error_text or ""):
+                return reason
         return None
 
     def _execute_cli(self, tool: str, instruction: str, files: List[str], workdir: str) -> Dict[str, Any]:

@@ -4,14 +4,46 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageStat
 
 logger = logging.getLogger("founderscrew.screenshot_tools")
 
+QA_EMAIL_ENV_KEYS = [
+    "PLAYWRIGHT_TEST_EMAIL",
+    "QA_LOGIN_EMAIL",
+    "QA_EMAIL",
+    "QA_USER_EMAIL",
+    "TWIF_QA_EMAIL",
+    "TWIF_TEST_EMAIL",
+    "TWIF_LOGIN_EMAIL",
+    "FOUNDER_EMAIL",
+    "FOUNDERCREW_QA_EMAIL",
+    "E2E_EMAIL",
+    "PLAYWRIGHT_EMAIL",
+    "TEST_USER_EMAIL",
+]
+QA_PASSWORD_ENV_KEYS = [
+    "PLAYWRIGHT_TEST_PASSWORD",
+    "QA_LOGIN_PASSWORD",
+    "QA_PASSWORD",
+    "QA_USER_PASSWORD",
+    "TWIF_QA_PASSWORD",
+    "TWIF_TEST_PASSWORD",
+    "TWIF_LOGIN_PASSWORD",
+    "FOUNDER_PASSWORD",
+    "FOUNDERCREW_QA_PASSWORD",
+    "E2E_PASSWORD",
+    "PLAYWRIGHT_PASSWORD",
+    "TEST_USER_PASSWORD",
+]
+QA_LOGIN_PATH_ENV_KEYS = ["QA_LOGIN_PATH", "TWIF_QA_LOGIN_PATH", "E2E_LOGIN_PATH"]
+QA_ALLOWED_PATHS_ENV = "FOUNDERSCREW_QA_ALLOWED_PATHS"
+
 def capture_screenshot(
     url: str,
     output_path: str,
-    allow_mock: bool = True,
+    allow_mock: bool = False,
     workdir: Optional[str] = None,
 ) -> bool:
     """Captures a screenshot of a webpage.
@@ -99,6 +131,91 @@ def analyze_screenshot(image_path: str) -> Dict[str, Any]:
         }
 
 
+def _playwright_env(workdir: Optional[Path] = None) -> Dict[str, str]:
+    env = os.environ.copy()
+    if workdir:
+        env.update(_read_workspace_dotenv(workdir))
+    env["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+    env["FOUNDERSCREW_QA_EMAIL_KEYS"] = json.dumps(QA_EMAIL_ENV_KEYS)
+    env["FOUNDERSCREW_QA_PASSWORD_KEYS"] = json.dumps(QA_PASSWORD_ENV_KEYS)
+    env["FOUNDERSCREW_QA_LOGIN_PATH_KEYS"] = json.dumps(QA_LOGIN_PATH_ENV_KEYS)
+    if _first_env_value(env, QA_EMAIL_ENV_KEYS) and _first_env_value(env, QA_PASSWORD_ENV_KEYS):
+        logger.info("QA browser authentication credentials detected in workspace environment.")
+    else:
+        logger.info("QA browser authentication credentials not configured; proceeding unauthenticated.")
+    return env
+
+
+def _read_workspace_dotenv(workdir: Path) -> Dict[str, str]:
+    env_file = workdir / ".env"
+    if not env_file.exists():
+        return {}
+    values: Dict[str, str] = {}
+    try:
+        for raw_line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if not key:
+                continue
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            values[key] = value
+    except Exception as e:
+        logger.warning(f"Could not read workspace .env for QA browser environment: {e}")
+    return values
+
+
+def _first_env_value(env: Dict[str, str], keys: list[str]) -> str:
+    for key in keys:
+        value = env.get(key)
+        if value:
+            return value
+    return ""
+
+
+def _unsupported_interactive_route(actions: list[dict[str, Any]], base_url: str) -> str:
+    raw_allowed = os.environ.get(QA_ALLOWED_PATHS_ENV, "")
+    if not raw_allowed:
+        return ""
+    try:
+        allowed = {str(path).strip() for path in json.loads(raw_allowed) if str(path).strip()}
+    except Exception:
+        return ""
+    if not allowed:
+        return ""
+    allowed_normalized = {_normalize_route_path(path) for path in allowed}
+    base_origin = _url_origin(base_url)
+    for step in actions:
+        if not isinstance(step, dict) or step.get("action") != "navigate":
+            continue
+        target = str(step.get("url") or "").strip()
+        if not target:
+            continue
+        parsed = urlparse(target)
+        if parsed.scheme and _url_origin(target) != base_origin:
+            return target
+        target_path = _normalize_route_path(parsed.path if parsed.scheme else target)
+        if target_path not in allowed_normalized:
+            return target_path
+    return ""
+
+
+def _normalize_route_path(path: str) -> str:
+    normalized = (path or "/").split("?", 1)[0].split("#", 1)[0].strip()
+    if not normalized.startswith("/"):
+        normalized = "/" + normalized
+    return normalized.rstrip("/") or "/"
+
+
+def _url_origin(url: str) -> str:
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+
+
 def diagnose_page_render(url: str, workdir: Optional[str] = None) -> Dict[str, Any]:
     """Collects browser diagnostics for a rendered page using local Playwright."""
     workspace = Path(workdir) if workdir else Path.cwd()
@@ -135,6 +252,107 @@ try {
   }
 }
 
+const emailKeys = JSON.parse(process.env.FOUNDERSCREW_QA_EMAIL_KEYS || '[]');
+const passwordKeys = JSON.parse(process.env.FOUNDERSCREW_QA_PASSWORD_KEYS || '[]');
+const loginPathKeys = JSON.parse(process.env.FOUNDERSCREW_QA_LOGIN_PATH_KEYS || '[]');
+
+function firstEnv(keys) {
+  for (const key of keys) {
+    if (process.env[key]) return process.env[key];
+  }
+  return '';
+}
+
+function withBase(baseUrl, pathOrUrl) {
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  const origin = new URL(baseUrl).origin;
+  return origin + '/' + String(pathOrUrl || '/').replace(/^\//, '');
+}
+
+function pathLooksAuth(url) {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return /(^|\/)(auth|login|signin|sign-in|sign_in)(\/|$)/.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function hasVisibleAuthForm(page) {
+  const emailVisible = await page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first().isVisible({ timeout: 500 }).catch(() => false);
+  const passwordVisible = await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().isVisible({ timeout: 500 }).catch(() => false);
+  return emailVisible && passwordVisible;
+}
+
+async function isLikelyAuthScreen(page) {
+  if (await hasVisibleAuthForm(page)) return true;
+  return pathLooksAuth(page.url());
+}
+
+async function waitForAuthToClear(page) {
+  for (let i = 0; i < 12; i++) {
+    if (!(await isLikelyAuthScreen(page))) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+async function dismissConsentPopups(page, result) {
+  const selectors = [
+    'button:has-text("Accept All")',
+    'button:has-text("Accept all")',
+    'button:has-text("Accept Cookies")',
+    'button:has-text("Accept cookies")',
+    'button:has-text("I Accept")',
+    'button:has-text("I agree")',
+    'button:has-text("Agree")',
+    '[data-testid="accept-cookies"]',
+    '[data-testid="cookie-accept"]',
+    '[aria-label="Accept cookies"]',
+    '[aria-label="Accept All"]'
+  ];
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if (await locator.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await locator.click({ timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      if (result) result.consent = { dismissed: true, selector };
+      return true;
+    }
+  }
+  if (result && !result.consent) result.consent = { dismissed: false };
+  return false;
+}
+
+async function bootstrapLogin(page, targetUrl, result) {
+  const email = firstEnv(emailKeys);
+  const password = firstEnv(passwordKeys);
+  if (!email || !password) {
+    result.auth = { attempted: false, reason: 'QA login credentials not configured' };
+    return;
+  }
+  const loginUrl = withBase(targetUrl, firstEnv(loginPathKeys) || '/auth');
+  result.auth = { attempted: true, loginUrl };
+  try {
+    await page.goto(loginUrl, { timeout: 30000, waitUntil: 'load' });
+    await page.waitForTimeout(1000);
+    await dismissConsentPopups(page, result);
+    await page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first().fill(email, { timeout: 10000 });
+    await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().fill(password, { timeout: 10000 });
+    await page.locator('button[type="submit"], button:has-text("Login"), button:has-text("Log In"), button:has-text("Sign In")').first().click({ timeout: 10000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    result.auth.ok = await waitForAuthToClear(page);
+    result.auth.finalUrl = page.url();
+    if (!result.auth.ok) {
+      result.auth.error = 'Login form or auth route remained visible after submitting QA credentials.';
+    }
+  } catch (error) {
+    result.auth.ok = false;
+    result.auth.error = error && error.message ? error.message : String(error);
+  }
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const result = { ok: true, url, consoleErrors: [], pageErrors: [], failedRequests: [] };
@@ -150,8 +368,16 @@ try {
       const failure = request.failure();
       result.failedRequests.push(`${request.method()} ${request.url()} ${failure ? failure.errorText : ''}`.trim());
     });
+    await bootstrapLogin(page, url, result);
     const response = await page.goto(url, { timeout: 30000, waitUntil: 'load' });
     await page.waitForTimeout(1000);
+    await dismissConsentPopups(page, result);
+    if (result.auth && result.auth.attempted && await isLikelyAuthScreen(page)) {
+      result.ok = false;
+      result.auth.ok = false;
+      result.auth.finalUrl = page.url();
+      result.auth.error = `Target route ${url} rendered an auth/login screen after QA login.`;
+    }
     result.status = response ? response.status() : null;
     result.finalUrl = page.url();
     result.title = await page.title();
@@ -172,8 +398,7 @@ try {
 });
 """
     try:
-        env = os.environ.copy()
-        env["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+        env = _playwright_env(workspace)
         result = subprocess.run(
             ["node", "-e", script, url, str(workspace)],
             cwd=str(workspace),
@@ -263,14 +488,106 @@ try {
   }
 }
 
+const emailKeys = JSON.parse(process.env.FOUNDERSCREW_QA_EMAIL_KEYS || '[]');
+const passwordKeys = JSON.parse(process.env.FOUNDERSCREW_QA_PASSWORD_KEYS || '[]');
+const loginPathKeys = JSON.parse(process.env.FOUNDERSCREW_QA_LOGIN_PATH_KEYS || '[]');
+
+function firstEnv(keys) {
+  for (const key of keys) {
+    if (process.env[key]) return process.env[key];
+  }
+  return '';
+}
+
+function withBase(baseUrl, pathOrUrl) {
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  const origin = new URL(baseUrl).origin;
+  return origin + '/' + String(pathOrUrl || '/').replace(/^\//, '');
+}
+
+function pathLooksAuth(url) {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return /(^|\/)(auth|login|signin|sign-in|sign_in)(\/|$)/.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function hasVisibleAuthForm(page) {
+  const emailVisible = await page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first().isVisible({ timeout: 500 }).catch(() => false);
+  const passwordVisible = await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().isVisible({ timeout: 500 }).catch(() => false);
+  return emailVisible && passwordVisible;
+}
+
+async function isLikelyAuthScreen(page) {
+  if (await hasVisibleAuthForm(page)) return true;
+  return pathLooksAuth(page.url());
+}
+
+async function waitForAuthToClear(page) {
+  for (let i = 0; i < 12; i++) {
+    if (!(await isLikelyAuthScreen(page))) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+async function dismissConsentPopups(page) {
+  const selectors = [
+    'button:has-text("Accept All")',
+    'button:has-text("Accept all")',
+    'button:has-text("Accept Cookies")',
+    'button:has-text("Accept cookies")',
+    'button:has-text("I Accept")',
+    'button:has-text("I agree")',
+    'button:has-text("Agree")',
+    '[data-testid="accept-cookies"]',
+    '[data-testid="cookie-accept"]',
+    '[aria-label="Accept cookies"]',
+    '[aria-label="Accept All"]'
+  ];
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if (await locator.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await locator.click({ timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      return true;
+    }
+  }
+  return false;
+}
+
+async function bootstrapLogin(page, targetUrl) {
+  const email = firstEnv(emailKeys);
+  const password = firstEnv(passwordKeys);
+  if (!email || !password) return;
+  await page.goto(withBase(targetUrl, firstEnv(loginPathKeys) || '/auth'), { timeout: 30000, waitUntil: 'load' });
+  await page.waitForTimeout(1000);
+  await dismissConsentPopups(page);
+  await page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first().fill(email, { timeout: 10000 });
+  await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().fill(password, { timeout: 10000 });
+  await page.locator('button[type="submit"], button:has-text("Login"), button:has-text("Log In"), button:has-text("Sign In")').first().click({ timeout: 10000 });
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+  if (!(await waitForAuthToClear(page))) {
+    throw new Error('Login form or auth route remained visible after submitting QA credentials.');
+  }
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await bootstrapLogin(page, url);
     // Use networkidle to wait for client-side hydration (React, Next.js, etc.)
     await page.goto(url, { timeout: 30000, waitUntil: 'networkidle' });
     // Extra delay for SPA frameworks that render after network settles
     await page.waitForTimeout(3000);
+    await dismissConsentPopups(page);
+    if ((firstEnv(emailKeys) || firstEnv(passwordKeys)) && await isLikelyAuthScreen(page)) {
+      throw new Error(`Target route ${url} rendered an auth/login screen after QA login.`);
+    }
     await page.screenshot({ path: outputPath });
   } finally {
     await browser.close();
@@ -282,8 +599,7 @@ try {
 """
     try:
         logger.info(f"Attempting to capture screenshot of {url} using Node Playwright in {workdir}...")
-        env = os.environ.copy()
-        env["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+        env = _playwright_env(workdir)
         result = subprocess.run(
             ["node", "-e", script, url, str(output_file), str(workdir)],
             cwd=str(workdir),
@@ -420,6 +736,26 @@ def capture_interactive_screenshot(
             "observations": [],
         })
 
+    unsupported_route = _unsupported_interactive_route(action_list, base_url)
+    if unsupported_route:
+        allowed = os.environ.get(QA_ALLOWED_PATHS_ENV, "")
+        logger.warning(
+            "Rejected QA browser navigation outside inferred route candidates: %s (allowed: %s)",
+            unsupported_route,
+            allowed,
+        )
+        return json.dumps({
+            "ok": False,
+            "screenshots": [],
+            "errors": [
+                f"Unsupported QA navigation route: {unsupported_route}. "
+                f"Use one of the inferred target routes: {allowed}"
+            ],
+            "observations": [
+                "The interactive browser tool refused to navigate outside the orchestrator-inferred QA route candidates."
+            ],
+        })
+
     # Serialize validated actions for the Node script
     actions_json = json.dumps(action_list)
 
@@ -449,6 +785,111 @@ try {
   }
 }
 
+const emailKeys = JSON.parse(process.env.FOUNDERSCREW_QA_EMAIL_KEYS || '[]');
+const passwordKeys = JSON.parse(process.env.FOUNDERSCREW_QA_PASSWORD_KEYS || '[]');
+const loginPathKeys = JSON.parse(process.env.FOUNDERSCREW_QA_LOGIN_PATH_KEYS || '[]');
+
+function firstEnv(keys) {
+  for (const key of keys) {
+    if (process.env[key]) return process.env[key];
+  }
+  return '';
+}
+
+function withBase(baseUrl, pathOrUrl) {
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  const origin = new URL(baseUrl).origin;
+  return origin + '/' + String(pathOrUrl || '/').replace(/^\//, '');
+}
+
+function pathLooksAuth(url) {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return /(^|\/)(auth|login|signin|sign-in|sign_in)(\/|$)/.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function hasVisibleAuthForm(page) {
+  const emailVisible = await page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first().isVisible({ timeout: 500 }).catch(() => false);
+  const passwordVisible = await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().isVisible({ timeout: 500 }).catch(() => false);
+  return emailVisible && passwordVisible;
+}
+
+async function isLikelyAuthScreen(page) {
+  if (await hasVisibleAuthForm(page)) return true;
+  return pathLooksAuth(page.url());
+}
+
+async function waitForAuthToClear(page) {
+  for (let i = 0; i < 12; i++) {
+    if (!(await isLikelyAuthScreen(page))) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+async function dismissConsentPopups(page, result) {
+  const selectors = [
+    'button:has-text("Accept All")',
+    'button:has-text("Accept all")',
+    'button:has-text("Accept Cookies")',
+    'button:has-text("Accept cookies")',
+    'button:has-text("I Accept")',
+    'button:has-text("I agree")',
+    'button:has-text("Agree")',
+    '[data-testid="accept-cookies"]',
+    '[data-testid="cookie-accept"]',
+    '[aria-label="Accept cookies"]',
+    '[aria-label="Accept All"]'
+  ];
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if (await locator.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await locator.click({ timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      result.consent = { dismissed: true, selector };
+      result.observations.push(`Dismissed consent popup using ${selector}`);
+      return true;
+    }
+  }
+  if (!result.consent) result.consent = { dismissed: false };
+  return false;
+}
+
+async function bootstrapLogin(page, baseUrl, result) {
+  const email = firstEnv(emailKeys);
+  const password = firstEnv(passwordKeys);
+  if (!email || !password) {
+    result.auth = { attempted: false, reason: 'QA login credentials not configured' };
+    return;
+  }
+  result.auth = { attempted: true, loginUrl: withBase(baseUrl, firstEnv(loginPathKeys) || '/auth') };
+  try {
+    await page.goto(result.auth.loginUrl, { timeout: 30000, waitUntil: 'load' });
+    await page.waitForTimeout(1000);
+    await dismissConsentPopups(page, result);
+    await page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first().fill(email, { timeout: 10000 });
+    await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().fill(password, { timeout: 10000 });
+    await page.locator('button[type="submit"], button:has-text("Login"), button:has-text("Log In"), button:has-text("Sign In")').first().click({ timeout: 10000 });
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    result.auth.ok = await waitForAuthToClear(page);
+    result.auth.finalUrl = page.url();
+    if (result.auth.ok) {
+      result.observations.push('Authenticated browser session using configured QA credentials.');
+    } else {
+      result.auth.error = 'Login form or auth route remained visible after submitting QA credentials.';
+      result.errors.push(`QA login did not establish an authenticated session: ${result.auth.error}`);
+    }
+  } catch (error) {
+    result.auth.ok = false;
+    result.auth.error = error && error.message ? error.message : String(error);
+    result.errors.push(`QA login failed: ${result.auth.error}`);
+  }
+}
+
 (async () => {
   const actions = JSON.parse(actionsJson);
   const result = { ok: true, screenshots: [], errors: [], observations: [] };
@@ -456,18 +897,25 @@ try {
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
-    // Navigate to base URL first
-    await page.goto(baseUrl, { timeout: 30000, waitUntil: 'load' });
-    await page.waitForTimeout(1500);
+    await bootstrapLogin(page, baseUrl, result);
 
     for (let i = 0; i < actions.length; i++) {
       const step = actions[i];
       try {
         switch (step.action) {
           case 'navigate': {
-            const target = step.url.startsWith('http') ? step.url : baseUrl.replace(/\/$/, '') + step.url;
+            const target = withBase(baseUrl, step.url);
             await page.goto(target, { timeout: 30000, waitUntil: 'load' });
+            await dismissConsentPopups(page, result);
             await page.waitForTimeout(1500);
+            if (result.auth && result.auth.attempted && await isLikelyAuthScreen(page)) {
+              result.ok = false;
+              result.auth.ok = false;
+              result.auth.finalUrl = page.url();
+              const message = `Target route ${target} rendered an auth/login screen after QA login.`;
+              result.auth.error = message;
+              result.errors.push(message);
+            }
             result.observations.push(`Navigated to ${target}`);
             break;
           }
@@ -543,8 +991,7 @@ try {
 """
     try:
         logger.info(f"Running interactive screenshot session with {len(action_list)} actions at {base_url}")
-        env = os.environ.copy()
-        env["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+        env = _playwright_env(workspace)
         result = subprocess.run(
             ["node", "-e", script, base_url, str(out_dir), str(workspace), actions_json],
             cwd=str(workspace),

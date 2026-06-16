@@ -1,8 +1,10 @@
 from pathlib import Path
+from unittest.mock import patch
 from PIL import Image
 from founderscrew.tools import screenshot_tools
 from founderscrew.tools.screenshot_tools import (
     analyze_screenshot,
+    capture_interactive_screenshot,
     capture_screenshot,
     diagnose_page_render,
     generate_mock_browser_screenshot,
@@ -44,6 +46,10 @@ def test_capture_screenshot_uses_workspace_node_playwright_when_python_missing(t
     workdir.mkdir()
     (workdir / "node_modules").mkdir()
     (workdir / "package.json").write_text('{"devDependencies":{"@playwright/test":"^1.40.0"}}')
+    (workdir / ".env").write_text(
+        "PLAYWRIGHT_TEST_EMAIL=founder@example.com\nPLAYWRIGHT_TEST_PASSWORD=secret-password\n",
+        encoding="utf-8",
+    )
     output_path = tmp_path / "real.png"
 
     def fail_if_python_is_used(url, output_file, errors):
@@ -53,7 +59,16 @@ def test_capture_screenshot_uses_workspace_node_playwright_when_python_missing(t
         assert cmd[0:2] == ["node", "-e"]
         assert cwd == str(workdir)
         assert cmd[-1] == str(workdir)
+        assert "secret-password" not in cmd
+        assert "bootstrapLogin" in cmd[2]
+        assert "dismissConsentPopups" in cmd[2]
+        assert "waitForAuthToClear" in cmd[2]
+        assert "Target route" in cmd[2]
+        assert 'button:has-text("Accept All")' in cmd[2]
         assert env["PLAYWRIGHT_BROWSERS_PATH"] == "0"
+        assert env["PLAYWRIGHT_TEST_EMAIL"] == "founder@example.com"
+        assert env["PLAYWRIGHT_TEST_PASSWORD"] == "secret-password"
+        assert "PLAYWRIGHT_TEST_EMAIL" in env["FOUNDERSCREW_QA_EMAIL_KEYS"]
         Path(cmd[-2]).write_bytes(b"png")
 
         class Result:
@@ -130,3 +145,57 @@ def test_diagnose_page_render_uses_workspace_node_playwright(tmp_path, monkeypat
 
     assert diagnostics["ok"] is True
     assert diagnostics["status"] == 200
+
+def test_capture_interactive_screenshot_loads_workspace_auth_env(tmp_path, monkeypatch):
+    workdir = tmp_path / "app"
+    workdir.mkdir()
+    (workdir / "node_modules").mkdir()
+    (workdir / ".env").write_text(
+        "PLAYWRIGHT_TEST_EMAIL=founder@example.com\nPLAYWRIGHT_TEST_PASSWORD=secret-password\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "shots"
+
+    def fake_run(cmd, cwd, capture_output, text, timeout, env):
+        assert cmd[0:2] == ["node", "-e"]
+        assert cwd == str(workdir)
+        assert "bootstrapLogin" in cmd[2]
+        assert "dismissConsentPopups" in cmd[2]
+        assert "waitForAuthToClear" in cmd[2]
+        assert "Target route" in cmd[2]
+        assert "secret-password" not in cmd
+        assert env["PLAYWRIGHT_TEST_EMAIL"] == "founder@example.com"
+        assert env["PLAYWRIGHT_TEST_PASSWORD"] == "secret-password"
+
+        class Result:
+            returncode = 0
+            stdout = '{"ok": true, "screenshots": [], "errors": [], "observations": ["Authenticated browser session using configured QA credentials."]}'
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(screenshot_tools.subprocess, "run", fake_run)
+
+    result = capture_interactive_screenshot(
+        '[{"action":"navigate","url":"/draft"},{"action":"screenshot","name":"draft"}]',
+        "http://localhost:3001",
+        str(output_dir),
+        workdir=str(workdir),
+    )
+
+    assert "Authenticated browser session" in result
+
+def test_capture_interactive_screenshot_rejects_off_candidate_route(tmp_path, monkeypatch):
+    workdir = tmp_path / "app"
+    workdir.mkdir()
+    (workdir / "node_modules").mkdir()
+
+    with patch.dict("os.environ", {"FOUNDERSCREW_QA_ALLOWED_PATHS": '["/draft", "/draftplan"]'}):
+        result = capture_interactive_screenshot(
+            '[{"action":"navigate","url":"/addteam"},{"action":"screenshot","name":"wrong"}]',
+            "http://localhost:3001",
+            str(tmp_path / "shots"),
+            workdir=str(workdir),
+        )
+
+    assert "Unsupported QA navigation route: /addteam" in result

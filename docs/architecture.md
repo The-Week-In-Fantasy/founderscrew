@@ -19,7 +19,7 @@ Managed using **Google Agent Development Kit (ADK)**:
 - **BuilderAgent**: Orchestrates code writing using the pluggable `CodingToolAdapter`.
 - **TesterAgent**: Runs automated test suites and captures screenshots.
 - **ReviewerAgent**: Analyzes diff changes and integrates CodeRabbit review comment loops.
-- **QAAgent**: Compares visual outputs to find UI regressions. Exposed as an A2A service.
+- **QAAgent**: Performs targeted, issue-specific browser verification. The orchestrator infers the correct route from changed component imports and route declarations, captures real Playwright evidence on that route, and constrains interactive QA to the inferred route candidates. Exposed as an A2A service.
 - **DeployerAgent**: Manages PRs, branches, and merges.
 
 ### C. The Interface Layer (Dashboard)
@@ -28,7 +28,12 @@ Managed using **Google Agent Development Kit (ADK)**:
 
 ### D. The Workflow Worker Layer
 - **Persistent Workflow Queue (`workflow_queue.py`)**: Stores stage jobs in SQLite locally or Firestore in cloud deployments.
-- **Worker Process (`worker.py`)**: Claims queued jobs and runs the Orchestrator stages that perform agent calls, git operations, tests, browser automation, screenshots, and PR creation.
+- **Worker Process (`worker.py`)**: Claims queued jobs and runs the Orchestrator stages that perform agent calls, git operations, tests, quality gates, browser automation, screenshots, and PR creation.
+
+### QA route and browser evidence
+- **Route inference (`tools/route_inference.py`)** builds a lightweight source sitemap from imports and React route declarations. It starts from affected or changed component files, follows reverse import chains to routed page components, and treats route declaration files such as `App.jsx` as route maps rather than impacted UI surfaces.
+- **Allowed-route enforcement** passes the inferred route list to the QA browser tool through `FOUNDERSCREW_QA_ALLOWED_PATHS`. Interactive QA navigation outside that list is rejected and reported as a QA route/tooling blocker instead of sending Builder to render components on unrelated pages.
+- **Real browser evidence** uses workspace-local Playwright with mock screenshot fallback disabled for QA approval evidence. The screenshot tools load workspace `.env` values such as `PLAYWRIGHT_TEST_EMAIL` and `PLAYWRIGHT_TEST_PASSWORD`, attempt login for protected routes, and dismiss common cookie/privacy consent popups before final screenshots.
 
 ### E. The A2A Interoperability Layer
 - Exposes a JSON-RPC 2.0 endpoint at `/api/v1/a2a/qa` mapping parameters to the QA Agent.

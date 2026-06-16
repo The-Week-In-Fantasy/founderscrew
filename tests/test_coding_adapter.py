@@ -2,7 +2,7 @@ import os
 import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
-from founderscrew.tools.coding_adapter import CodingToolAdapter
+from founderscrew.tools.coding_adapter import CodingToolAdapter, _CLI_HEALTH_FAILURES
 
 def test_coding_adapter_cli_claude(tmp_path):
     """Verifies that CLI mode for Claude executes the expected subprocess command."""
@@ -71,6 +71,31 @@ def test_coding_adapter_cli_gemini_uses_headless_prompt(tmp_path):
     assert "code" not in args
     assert "--approval-mode" in args
     assert "yolo" in args
+
+def test_coding_adapter_circuit_breaks_persistent_gemini_cli_failure(tmp_path):
+    adapter = CodingToolAdapter()
+    adapter.mode = "cli"
+    adapter.tier1 = "gemini"
+    adapter.tier2 = ""
+    adapter.tier3 = ""
+    _CLI_HEALTH_FAILURES.clear()
+
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stdout = ""
+    mock_result.stderr = "SERVICE_DISABLED cloudaicompanion.googleapis.com"
+
+    try:
+        with patch("founderscrew.tools.coding_adapter.shutil.which", return_value="gemini"), \
+             patch("subprocess.run", return_value=mock_result) as mock_run, \
+             patch.object(adapter, "_execute_api", return_value={"success": True, "mode": "api"}):
+            assert adapter.execute_coding_task("edit code", ["main.py"], str(tmp_path))["success"] is True
+            assert _CLI_HEALTH_FAILURES["gemini"] == "Gemini CLI Code Assist API is disabled"
+            assert adapter.execute_coding_task("edit code", ["main.py"], str(tmp_path))["success"] is True
+
+        mock_run.assert_called_once()
+    finally:
+        _CLI_HEALTH_FAILURES.clear()
 
 def test_coding_adapter_skips_unavailable_cli_tiers(tmp_path):
     adapter = CodingToolAdapter()

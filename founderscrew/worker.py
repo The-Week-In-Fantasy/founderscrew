@@ -4,6 +4,7 @@ from typing import Optional
 
 from founderscrew.config import settings
 from founderscrew.orchestrator import Orchestrator
+from founderscrew.runtime_diagnostics import log_runtime_fingerprint
 from founderscrew.workflow_queue import WorkflowJob, WorkflowQueue
 
 logger = logging.getLogger("founderscrew.worker")
@@ -47,6 +48,7 @@ async def run_worker_loop(
     orchestrator = Orchestrator()
     queue = WorkflowQueue()
     logger.info("Founders.crew worker started.")
+    log_runtime_fingerprint("worker-loop")
     while True:
         ran = await run_worker_once(orchestrator, queue, lease_seconds=lease_seconds)
         if not ran:

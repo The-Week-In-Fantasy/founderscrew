@@ -91,5 +91,15 @@ This starts a server on `http://localhost:8080` (or your configured port):
    - **Triage**: Classifies the issue and finds affected files.
    - **Planning**: Creates a plan and posts it as a comment on the issue for you to approve (via reaction or comment).
    - **Building**: Automatically writes code using your preferred tool.
-   - **Testing**: Runs the tests and captures screenshots.
+   - **Testing**: Runs the tests and quality checks.
+   - **QA**: Infers the affected app route from component imports, captures real Playwright evidence on that route, logs in with configured QA credentials when available, and blocks navigation to unrelated routes.
    - **PR Creation**: Submits a Pull Request with all context attached.
+
+For protected web apps, add QA credentials to the target workspace environment with:
+
+```bash
+PLAYWRIGHT_TEST_EMAIL=founder-test@example.com
+PLAYWRIGHT_TEST_PASSWORD=your-test-password
+```
+
+The browser tooling will also try to dismiss common cookie/privacy consent prompts such as "Accept All" before collecting final screenshots.

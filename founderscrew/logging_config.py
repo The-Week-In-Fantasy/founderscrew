@@ -29,6 +29,19 @@ class _LiteLLMLoggingWorkerNoiseFilter(logging.Filter):
             return True
         return "LoggingWorker error" not in msg
 
+class _ADKSecondaryNoiseFilter(logging.Filter):
+    """Drops secondary cancellation/context logs after handled agent failures."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if record.name == "google_adk.google.adk.runners":
+            return not ("Root node" in msg and "was cancelled" in msg)
+        if record.name == "opentelemetry.context":
+            return "Failed to detach context" not in msg
+        return True
+
 def setup_logging():
     """Sets up a robust, rotating file logger and console logger."""
     log_dir = CONFIG_DIR / "logs"
@@ -85,3 +98,8 @@ def setup_logging():
     litellm_logger = logging.getLogger("LiteLLM")
     if not any(isinstance(f, _LiteLLMLoggingWorkerNoiseFilter) for f in litellm_logger.filters):
         litellm_logger.addFilter(_LiteLLMLoggingWorkerNoiseFilter())
+
+    for logger_name in ["google_adk.google.adk.runners", "opentelemetry.context"]:
+        noise_logger = logging.getLogger(logger_name)
+        if not any(isinstance(f, _ADKSecondaryNoiseFilter) for f in noise_logger.filters):
+            noise_logger.addFilter(_ADKSecondaryNoiseFilter())

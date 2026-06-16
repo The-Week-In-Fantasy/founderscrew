@@ -41,6 +41,7 @@ def start(port, headless, reload):
     """Start the Founders.crew Webhook & Dashboard server."""
     import uvicorn
     from founderscrew.config import settings, CONFIG_FILE
+    from founderscrew.runtime_diagnostics import log_runtime_fingerprint
     
     # Check if config exists, if not, redirect to setup wizard
     if not CONFIG_FILE.exists():
@@ -49,6 +50,7 @@ def start(port, headless, reload):
         SetupWizard().run()
         
     p = port or settings.get("dashboard.port", 8080)
+    log_runtime_fingerprint("dashboard")
     console.print(f"\n[bold green]🚀 Starting Founders.crew Webhook & Dashboard on http://localhost:{p}[/bold green]")
     console.print("[dim]Agent workflows run in a separate worker process. Start one with: founders-crew worker[/dim]")
     
@@ -63,9 +65,11 @@ def start(port, headless, reload):
 def worker(once, poll_interval, lease_seconds):
     """Run the Founders.crew workflow worker."""
     import asyncio
+    from founderscrew.runtime_diagnostics import log_runtime_fingerprint
     from founderscrew.worker import run_worker_loop, run_worker_once
 
     if once:
+        log_runtime_fingerprint("worker-once")
         ran = asyncio.run(run_worker_once(lease_seconds=lease_seconds))
         if not ran:
             console.print("[yellow]No queued workflow jobs found.[/yellow]")

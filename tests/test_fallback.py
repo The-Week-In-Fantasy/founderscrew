@@ -94,6 +94,73 @@ async def test_orchestrator_run_agent_fallback(temp_db_path):
                 assert output == "Triage complete output"
                 assert call_count == 2  # Proves Tier 1 failed and Tier 2 was executed
 
+@pytest.mark.anyio
+async def test_orchestrator_run_agent_short_circuits_builder_tool_failure(temp_db_path):
+    """Builder should not burn every model tier on deterministic tool infrastructure failures."""
+    orch = Orchestrator()
+
+    with patch.object(settings, "get", side_effect=make_mock_settings_get(temp_db_path)):
+        orch.store.sqlite_db_path = temp_db_path
+        orch.store._init_sqlite()
+
+        mock_runner_instance = MagicMock()
+        call_count = 0
+
+        async def mock_run_async_generator(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            yield MockEvent(
+                error_code=1,
+                error_message=(
+                    "run_coding_tool execution failed: All coding tools and API fallbacks failed. "
+                    "Last CLI error: SERVICE_DISABLED cloudaicompanion.googleapis.com"
+                ),
+            )
+
+        mock_runner_instance.run_async = mock_run_async_generator
+
+        with patch("founderscrew.orchestrator.filter_available_tiers", return_value=[
+            "gemini/gemini-3.5-flash",
+            "openai/gpt-4o-mini",
+            "anthropic/claude-3-haiku",
+        ]), patch("founderscrew.orchestrator.Runner", return_value=mock_runner_instance):
+            from founderscrew.agents.builder_agent import get_builder_agent
+            with pytest.raises(RuntimeError, match="deterministic tool failure"):
+                await orch._run_agent(get_builder_agent, "test_session", "input_payload")
+
+        assert call_count == 1
+
+@pytest.mark.anyio
+async def test_orchestrator_run_agent_rate_limit_falls_back(temp_db_path):
+    orch = Orchestrator()
+
+    with patch.object(settings, "get", side_effect=make_mock_settings_get(temp_db_path)):
+        orch.store.sqlite_db_path = temp_db_path
+        orch.store._init_sqlite()
+
+        mock_runner_instance = MagicMock()
+        call_count = 0
+
+        async def mock_run_async_generator(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield MockEvent(error_code=1, error_message="429 RESOURCE_EXHAUSTED quota exceeded")
+            else:
+                yield MockEvent(text="Recovered on fallback tier")
+
+        mock_runner_instance.run_async = mock_run_async_generator
+
+        with patch("founderscrew.orchestrator.filter_available_tiers", return_value=[
+            "gemini/gemini-3.5-flash",
+            "openai/gpt-4o-mini",
+        ]), patch("founderscrew.orchestrator.Runner", return_value=mock_runner_instance):
+            from founderscrew.agents.triage_agent import get_triage_agent
+            output = await orch._run_agent(get_triage_agent, "test_session", "input_payload")
+
+        assert output == "Recovered on fallback tier"
+        assert call_count == 2
+
 def test_vertex_tier_requires_gcp_project(monkeypatch):
     """Vertex AI partner tiers are gated on a GCP project, not provider API keys."""
     from founderscrew.tools.model_routing import filter_available_tiers

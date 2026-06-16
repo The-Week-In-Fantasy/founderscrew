@@ -4,6 +4,7 @@ import json
 import asyncio
 import logging
 import subprocess
+from urllib.parse import urljoin
 from typing import Optional, Dict, Any, List
 from google.adk import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
@@ -45,6 +46,7 @@ from founderscrew.tools.github_tools import (
 from founderscrew.tools.shell_tools import run_safe_shell_command, start_dev_server, stop_dev_server
 from founderscrew.tools.screenshot_tools import analyze_screenshot, capture_screenshot, diagnose_page_render
 from founderscrew.tools.repo_profile import get_repo_memory, add_repo_lesson, format_repo_memory
+from founderscrew.tools.route_inference import infer_qa_route_candidates, format_route_candidates
 from founderscrew.tools.model_routing import filter_available_tiers, apply_provider_env
 from founderscrew.workflow_queue import WorkflowQueue
 from pathlib import Path
@@ -62,6 +64,24 @@ GENERATED_ARTIFACT_DIRS = [
     ".tmp_pytest_cache",
     ".pytest_cache",
     ".founderscrew",
+]
+
+DETERMINISTIC_BUILDER_TOOL_FAILURE_MARKERS = [
+    "run_coding_tool execution failed",
+    "All coding tools and API fallbacks failed",
+    "Refusing to send shell-command remediation",
+    "SERVICE_DISABLED",
+    "cloudaicompanion.googleapis.com",
+    "IDEClient] Directory mismatch",
+    "No modified files parsed from API response",
+]
+
+RATE_LIMIT_FAILURE_MARKERS = [
+    "429",
+    "RESOURCE_EXHAUSTED",
+    "Too Many Requests",
+    "rate limit",
+    "quota",
 ]
 
 class Orchestrator:
@@ -248,6 +268,59 @@ class Orchestrator:
             logger.warning(f"Failed to add GitHub comment to {repo_name}#{issue_number}: {e}")
             return False
 
+    def _summarize_agent_error(self, agent_name: str, model_tier: str, error_msg: str) -> str:
+        text = (error_msg or "").strip()
+        if any(marker.lower() in text.lower() for marker in RATE_LIMIT_FAILURE_MARKERS):
+            return (
+                f"{agent_name} hit a provider rate limit/quota error on {model_tier}; "
+                "falling back to the next configured tier if available."
+            )
+        if self._is_deterministic_builder_tool_failure(agent_name, text):
+            return (
+                "Builder stopped on a deterministic coding-tool infrastructure failure. "
+                f"Root cause: {self._first_matching_failure_marker(text) or text[:500]}"
+            )
+        return text[:1000] if text else "No error message provided."
+
+    def _is_deterministic_builder_tool_failure(self, agent_name: str, error_msg: str) -> bool:
+        if agent_name != "BuilderAgent":
+            return False
+        return any(marker in (error_msg or "") for marker in DETERMINISTIC_BUILDER_TOOL_FAILURE_MARKERS)
+
+    def _first_matching_failure_marker(self, error_msg: str) -> str:
+        for marker in DETERMINISTIC_BUILDER_TOOL_FAILURE_MARKERS:
+            if marker in (error_msg or ""):
+                return marker
+        return ""
+
+    def _join_qa_url(self, base_url: str, path: str) -> str:
+        normalized_path = (path or "/").strip() or "/"
+        if normalized_path.startswith("http://") or normalized_path.startswith("https://"):
+            return normalized_path
+        if not normalized_path.startswith("/"):
+            normalized_path = "/" + normalized_path
+        return urljoin(base_url.rstrip("/") + "/", normalized_path.lstrip("/"))
+
+    def _plan_files(self, state: WorkflowStateModel) -> List[str]:
+        files: List[str] = []
+        if state.plan:
+            for step in state.plan.steps:
+                files.extend(step.files_affected or [])
+        return files
+
+    def _is_qa_tooling_or_route_failure(self, qa_issue_text: str) -> bool:
+        text = (qa_issue_text or "").lower()
+        markers = [
+            "unsupported qa navigation route",
+            "refused to navigate outside",
+            "founderscrew qa visual report",
+            "founderscrew qa visual",
+            "placeholder",
+            "real capture failed",
+            "browser tool failed",
+        ]
+        return any(marker in text for marker in markers)
+
     def _qa_diagnostic_text(
         self,
         qa_url: str,
@@ -396,8 +469,14 @@ class Orchestrator:
                 logger.info(f"Agent {agent.name} succeeded with model {model_tier} (Tier {i+1})!")
                 return output
             else:
-                logger.warning(f"Agent {agent.name} failed with model {model_tier} (Tier {i+1}). Error: {error_msg}")
-                last_error = error_msg
+                summary = self._summarize_agent_error(agent.name, model_tier, error_msg)
+                logger.warning(f"Agent {agent.name} failed with model {model_tier} (Tier {i+1}). Error: {summary}")
+                last_error = summary
+                if self._is_deterministic_builder_tool_failure(agent.name, error_msg):
+                    raise RuntimeError(
+                        f"Agent {agent.name} stopped after a deterministic tool failure. "
+                        f"{summary}"
+                    )
                 
         raise RuntimeError(f"Agent {temp_agent.name} failed all {len(tiers)} model tiers. Last error: {last_error}")
 
@@ -1361,6 +1440,23 @@ class Orchestrator:
                             server_proc, qa_url = await asyncio.to_thread(start_dev_server, workdir, dev_cmd)
 
                         if qa_url:
+                            route_candidates = infer_qa_route_candidates(
+                                workdir,
+                                issue_title=state.issue.title,
+                                issue_body=state.issue.body or "",
+                                affected_files=state.issue.affected_files,
+                                changed_files=state.modified_files + self._plan_files(state),
+                            )
+                            qa_target_path = route_candidates[0]["path"] if route_candidates else "/"
+                            qa_capture_url = self._join_qa_url(str(qa_url), qa_target_path)
+                            route_candidate_text = format_route_candidates(route_candidates)
+                            qa_allowed_paths = [candidate["path"] for candidate in route_candidates] or [qa_target_path]
+                            logger.info(
+                                "QA route target for %s: %s (candidates: %s)",
+                                session_id,
+                                qa_capture_url,
+                                route_candidate_text.replace("\n", " | "),
+                            )
                             # Capture the screenshot deterministically (mock fallback
                             # disallowed — a generated placeholder must never pass as
                             # evidence) and attach the actual image so the multimodal
@@ -1370,7 +1466,7 @@ class Orchestrator:
                             candidate = shots_dir / f"{session_id}_qa.png"
                             captured = await asyncio.to_thread(
                                 capture_screenshot,
-                                str(qa_url),
+                                str(qa_capture_url),
                                 str(candidate),
                                 False,
                                 workdir,
@@ -1379,12 +1475,12 @@ class Orchestrator:
                             if not captured:
                                 render_diagnostics = await asyncio.to_thread(
                                     diagnose_page_render,
-                                    str(qa_url),
+                                    str(qa_capture_url),
                                     workdir,
                                 )
-                                diagnostic_text = self._qa_diagnostic_text(str(qa_url), None, render_diagnostics)
+                                diagnostic_text = self._qa_diagnostic_text(str(qa_capture_url), None, render_diagnostics)
                                 message = (
-                                    f"QA could not capture a real screenshot of {qa_url}. "
+                                    f"QA could not capture a real screenshot of {qa_capture_url}. "
                                     f"The workflow stopped before founder approval.\n\n{diagnostic_text}"
                                 )
                                 state.qa_report = QAReportModel(
@@ -1402,11 +1498,11 @@ class Orchestrator:
                             if screenshot_analysis.get("is_blank"):
                                 render_diagnostics = await asyncio.to_thread(
                                     diagnose_page_render,
-                                    str(qa_url),
+                                    str(qa_capture_url),
                                     workdir,
                                 )
                                 diagnostic_text = self._qa_diagnostic_text(
-                                    str(qa_url),
+                                    str(qa_capture_url),
                                     screenshot_analysis,
                                     render_diagnostics,
                                 )
@@ -1484,34 +1580,82 @@ class Orchestrator:
                             shots_dir = Path.home() / ".founderscrew" / "screenshots" / session_id
                             shots_dir.mkdir(parents=True, exist_ok=True)
 
-                            qa_data = await self._run_agent_json(
-                                get_qa_agent, session_id,
-                                {
-                                    "url": str(qa_url),
-                                    "issue_title": state.issue.title,
-                                    "issue_body": state.issue.body or "(no description provided)",
-                                    "plan_summary": state.plan.summary if state.plan else "(no plan available)",
-                                    "plan_steps": plan_steps_text or "(no steps available)",
-                                    "files_changed": ", ".join(files_changed) if files_changed else "(unknown)",
-                                    "test_results": test_summary or "(no test results)",
-                                    "output_dir": str(shots_dir),
-                                    "workdir": workdir,
-                                    "note": (
-                                        "A static screenshot of the rendered page is attached as an image for initial reference. "
-                                        "However, you MUST use capture_interactive_screenshot to perform targeted testing — "
-                                        "navigate to the specific page/component mentioned in the issue, interact with it "
-                                        "(click, hover, scroll), and take screenshots at each step to verify the fix. "
-                                        "Do NOT just evaluate the attached static screenshot and call it done."
-                                    )
-                                },
-                                image_paths=[screenshot_path]
-                            )
+                            qa_input = {
+                                "url": str(qa_url),
+                                "qa_target_url": str(qa_capture_url),
+                                "qa_target_path": qa_target_path,
+                                "qa_allowed_paths": qa_allowed_paths,
+                                "qa_route_candidates": route_candidate_text,
+                                "issue_title": state.issue.title,
+                                "issue_body": state.issue.body or "(no description provided)",
+                                "plan_summary": state.plan.summary if state.plan else "(no plan available)",
+                                "plan_steps": plan_steps_text or "(no steps available)",
+                                "files_changed": ", ".join(files_changed) if files_changed else "(unknown)",
+                                "test_results": test_summary or "(no test results)",
+                                "output_dir": str(shots_dir),
+                                "workdir": workdir,
+                                "note": (
+                                    "A static screenshot of the rendered page is attached as an image for initial reference. "
+                                    "However, you MUST use capture_interactive_screenshot to perform targeted testing — "
+                                    "start with qa_target_path and the inferred route candidates, interact with the specific page/component mentioned in the issue "
+                                    "(click, hover, scroll), and take screenshots at each step to verify the fix. "
+                                    "Do NOT navigate to unrelated routes such as /dashboard unless the inferred route candidates explicitly include them. "
+                                    "The browser tool will reject navigation outside qa_route_candidates. "
+                                    "If the component is not visible on the allowed routes, report a QA route/render blocker instead of guessing a new route. "
+                                    "Do NOT just evaluate the attached static screenshot and call it done."
+                                )
+                            }
+                            old_allowed_paths = os.environ.get("FOUNDERSCREW_QA_ALLOWED_PATHS")
+                            old_target_path = os.environ.get("FOUNDERSCREW_QA_TARGET_PATH")
+                            os.environ["FOUNDERSCREW_QA_ALLOWED_PATHS"] = json.dumps(qa_allowed_paths)
+                            os.environ["FOUNDERSCREW_QA_TARGET_PATH"] = qa_target_path
+                            try:
+                                qa_data = await self._run_agent_json(
+                                    get_qa_agent,
+                                    session_id,
+                                    qa_input,
+                                    image_paths=[screenshot_path],
+                                )
+                            finally:
+                                if old_allowed_paths is None:
+                                    os.environ.pop("FOUNDERSCREW_QA_ALLOWED_PATHS", None)
+                                else:
+                                    os.environ["FOUNDERSCREW_QA_ALLOWED_PATHS"] = old_allowed_paths
+                                if old_target_path is None:
+                                    os.environ.pop("FOUNDERSCREW_QA_TARGET_PATH", None)
+                                else:
+                                    os.environ["FOUNDERSCREW_QA_TARGET_PATH"] = old_target_path
                             if qa_data and not qa_data.get("passed", True):
                                 qa_issue_text = "\n\n".join(
                                     str(qa_data.get(key) or "")
                                     for key in ("test_plan", "observations", "issues_found")
                                     if qa_data.get(key)
                                 )
+                                if self._is_qa_tooling_or_route_failure(qa_issue_text):
+                                    message = (
+                                        "QA could not verify the issue because the browser/tooling route was invalid or produced non-real evidence. "
+                                        "The workflow stopped instead of asking Builder to alter production routes for QA.\n\n"
+                                        f"Inferred QA routes:\n{route_candidate_text}\n\n"
+                                        f"QA findings:\n{qa_issue_text[:3000]}"
+                                    )
+                                    state.qa_report = QAReportModel(
+                                        passed=False,
+                                        summary=message,
+                                        screenshots=[screenshot_path] if screenshot_path else [],
+                                        approved=False,
+                                    )
+                                    self._record_quality_gate(
+                                        state,
+                                        "visual_qa",
+                                        "interactive Playwright QA",
+                                        False,
+                                        message,
+                                        artifact_paths=[screenshot_path] if screenshot_path else [],
+                                    )
+                                    state.final_evidence_summary = self._build_final_evidence_summary(state)
+                                    self._fail(state, "qa", message)
+                                    self._add_issue_comment(repo_name, issue_number, f"❌ QA tooling/route verification failed:\n```\n{message[:2500]}\n```")
+                                    return
                                 if visual_fix_attempt < max_visual_fix_attempts:
                                     visual_fix_attempt += 1
                                     stop_dev_server(server_proc)

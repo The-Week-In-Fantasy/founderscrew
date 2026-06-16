@@ -60,3 +60,31 @@ def test_setup_logging_filters_litellm_worker_noise(tmp_path, monkeypatch):
     finally:
         root.handlers = original_handlers
         litellm_logger.filters = original_filters
+
+def test_setup_logging_filters_adk_secondary_noise(tmp_path, monkeypatch):
+    monkeypatch.setattr("founderscrew.logging_config.CONFIG_DIR", tmp_path)
+
+    root = logging.getLogger()
+    original_handlers = root.handlers[:]
+    root.handlers = []
+    runner_logger = logging.getLogger("google_adk.google.adk.runners")
+    otel_logger = logging.getLogger("opentelemetry.context")
+    original_runner_filters = runner_logger.filters[:]
+    original_otel_filters = otel_logger.filters[:]
+    runner_logger.filters = []
+    otel_logger.filters = []
+
+    try:
+        setup_logging()
+        assert any(
+            filt.__class__.__name__ == "_ADKSecondaryNoiseFilter"
+            for filt in runner_logger.filters
+        )
+        assert any(
+            filt.__class__.__name__ == "_ADKSecondaryNoiseFilter"
+            for filt in otel_logger.filters
+        )
+    finally:
+        root.handlers = original_handlers
+        runner_logger.filters = original_runner_filters
+        otel_logger.filters = original_otel_filters

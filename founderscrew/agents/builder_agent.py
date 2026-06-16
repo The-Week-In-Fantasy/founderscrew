@@ -38,6 +38,7 @@ To perform this job:
 4. Write a brief, targeted automated test that specifically verifies the issue is resolved. Save it as tests/integration/issue_[number]_test.spec.js for JavaScript/TypeScript projects, or tests/test_issue_[number].py for Python projects. Do not rely on the global regression suite.
 
 Do not use run_coding_tool to run shell commands, git commands, cleanup commands, or artifact/index remediation such as git rm --cached. Those operations are handled by the orchestrator's safe quality-gate tooling.
+Do not add, move, or render production components on unrelated routes just to make QA easier. Verify and fix the component where it is actually imported/rendered unless the issue explicitly asks for routing changes.
 
 Return a structured JSON block enclosed in ```json ... ``` containing:
 - "summary": a brief description of the code changes.

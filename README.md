@@ -70,7 +70,7 @@ flowchart TD
 2. **🏥 System Health Doctor (`founders-crew doctor`)**: Diagnostics CLI that runs end-to-end integration pings, credential checks, and tool availability status.
 3. **💾 Cloud Run Ready Persistence**: State Store supporting SQLite for local runs and **Google Cloud Firestore** for stateless Cloud Run persistence across cold starts.
 4. **🔌 Dual-Mode Coding Adapter**: Seamlessly toggles between local CLI subprocesses (Cursor, Claude Code) and direct API edits (via LiteLLM/Gemini) inside headless Docker containers.
-5. **👁️ Visual QA Verification**: Playwright browser captures and Pillow pixel similarity comparators that calculate visual difference scores.
+5. **👁️ Targeted Visual QA Verification**: The orchestrator infers QA routes from changed-file imports and React route declarations, captures real Playwright screenshots on the relevant page, logs in with configured QA credentials, dismisses common consent popups, and blocks browser navigation to unrelated routes.
 6. **🤝 A2A JSON-RPC Endpoint**: Exposes the QA Agent as a JSON-RPC 2.0 conformant service at `/api/v1/a2a/qa` which the Builder Agent requests to run visual layout regression checks.
 7. **💻 Responsive Web Dashboard**: Beautiful, dark-themed Jinja2 + HTMX console for tracking agent history, viewing plans/visual reports, and executing approvals.
 8. **📜 Rotating System Log Console**: Centralized, size-capped operational logging (configured with `RotatingFileHandler` writing to `~/.founderscrew/logs/founderscrew.log`). Integrates Uvicorn/FastAPI operational outputs and streams a real-time log viewer inside the web dashboard.
@@ -193,9 +193,9 @@ The QA Agent exposes an A2A agent card at `/.well-known/agent-card.json` and sup
 ---
 
 ## 🧪 Running the Test Suite
-We maintain a suite of 42 unit tests covering state stores, A2A endpoints, agents setup, rotating logging configuration, and UI routers:
+We maintain a pytest suite covering state stores, A2A endpoints, agents setup, workflow orchestration, QA route inference, screenshot tooling, logging, and UI routers:
 ```bash
-python -m pytest
+.\.venv\Scripts\python.exe -m pytest -q --basetemp=.tmp_pytest\basetemp -o cache_dir=.tmp_pytest_cache
 ```
 
 ---

@@ -315,6 +315,81 @@ async def test_qa_blank_screenshot_self_heals_before_approval(temp_db_path):
             assert queued.stage == "deploy"
 
 @pytest.mark.anyio
+async def test_qa_uses_inferred_route_for_initial_capture_and_agent_context(temp_db_path, tmp_path):
+    orch = Orchestrator()
+    (tmp_path / "src/components").mkdir(parents=True)
+    (tmp_path / "src/pages").mkdir(parents=True)
+    (tmp_path / "src/App.jsx").write_text(
+        """
+import DashboardPage from './pages/DashboardPage';
+import DraftAssistantPage from './pages/DraftAssistantPage';
+<Route path="/dashboard" element={<DashboardPage />} />
+<Route path="/draft" element={<FeatureFlagGate><DraftAssistantPage /></FeatureFlagGate>} />
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "src/components/DraftPlayerBoard.jsx").write_text(
+        "export default function DraftPlayerBoard() { return null; }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src/pages/DraftAssistantPage.jsx").write_text(
+        "import DraftPlayerBoard from '../components/DraftPlayerBoard';\n"
+        "export default function DraftAssistantPage() { return <DraftPlayerBoard />; }\n",
+        encoding="utf-8",
+    )
+
+    def settings_get(key, default=None):
+        if key == "state.db_path":
+            return temp_db_path
+        if key == "qa.target_url":
+            return "http://localhost:3001"
+        return default
+
+    with patch("founderscrew.config.settings.get", side_effect=settings_get):
+        orch.store.sqlite_db_path = temp_db_path
+        orch.store._init_sqlite()
+        orch.queue = WorkflowQueue()
+
+        state = WorkflowStateModel(
+            session_id="o_r_327",
+            issue=IssueContext(
+                number=327,
+                title="Summaries cut off on DraftPlayerBoard in draft assistant",
+                creator="c",
+                repository="o/r",
+                affected_files=["src/components/DraftPlayerBoard.jsx"],
+            ),
+            status=WorkflowStatus.QA,
+            plan=ImplementationPlanModel(summary="Fix DraftPlayerBoard summaries", steps=[]),
+            test_results=ResultsModel(
+                passed=True,
+                outcomes=[OutcomeModel(test_name="npm test", passed=True, output="ok")],
+            ),
+        )
+        orch.store.save_state(state)
+
+        with patch("founderscrew.orchestrator.github_add_comment"), \
+             patch("founderscrew.orchestrator.github_clone_or_pull", return_value=str(tmp_path)), \
+             patch("founderscrew.orchestrator.stop_dev_server"), \
+             patch("founderscrew.orchestrator.capture_screenshot", return_value=True) as mock_capture, \
+             patch("founderscrew.orchestrator.analyze_screenshot", return_value={"ok": True, "is_blank": False}), \
+             patch.object(
+                 orch,
+                 "_run_agent",
+                 new_callable=AsyncMock,
+                 return_value='{"passed": true, "similarity_percentage": 100.0, "observations": "verified"}',
+             ) as mock_run_agent:
+
+            await orch.run_build_test_review_flow(state, start_at="qa")
+
+    assert mock_capture.call_args.args[0] == "http://localhost:3001/draft"
+    qa_input = mock_run_agent.await_args.args[2]
+    assert qa_input["qa_target_path"] == "/draft"
+    assert qa_input["qa_allowed_paths"] == ["/draft"]
+    assert "/draft" in qa_input["qa_route_candidates"]
+    assert "/dashboard" not in qa_input["qa_route_candidates"]
+
+@pytest.mark.anyio
 async def test_builder_fix_receives_and_records_change_context(temp_db_path):
     orch = Orchestrator()
 
