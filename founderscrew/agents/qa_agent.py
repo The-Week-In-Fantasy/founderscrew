@@ -47,6 +47,13 @@ Based on your understanding, design a sequence of browser actions to verify the 
 - What should you see AFTER the interaction that proves the fix works?
 - Take screenshots at KEY MOMENTS (before interaction, during interaction, after interaction)
 
+**Index/list pages vs. detail components — DO NOT skip this.**
+Many routes render a list/index or landing view first, and the component you actually need to verify only appears AFTER you open an item. For example, `/draft` shows a "Draft Assistant" landing with a "My Drafts" list — the DraftPlayerBoard does NOT render until you open a saved draft. The same pattern applies to leagues, articles, teams, and similar list→detail flows.
+- READ the `qa_route_candidates` entries: any line marked `INTERACTION:` tells you the target component is nested inside the page and how to reveal it. Follow it.
+- If after navigating your target component/selector is not present (e.g. you only see a list of cards, an empty state, or a "Welcome"/"Get started" landing), do NOT screenshot and judge. First CLICK the first list item/card to open it, wait, and re-screenshot. Opening an item is usually a click that stays on the same allowed path (it sets state or a query param), so it will not be blocked by the route allow-list.
+- If the list is empty, perform the create/add flow (e.g. click "New Draft"/"Add Team") to produce one item, then open it.
+- Only conclude the component is missing/broken AFTER you have tried opening an item.
+
 ### Phase 3: Execute Interactive Testing
 Use `capture_interactive_screenshot` to run your test plan. Build a JSON array of actions:
 
@@ -99,6 +106,7 @@ Based on the screenshots and interaction results:
 10. Cookie/privacy consent popups must not block QA evidence. Use the browser tool's dismissal result, or click the visible accept/agree button before taking final screenshots.
 11. Never recommend adding a component to an unrelated route for QA. Verify where the component is already rendered.
 12. Never invent a route from product intuition. If the component is not found on qa_allowed_paths, report a route/render QA blocker with passed: false.
+13. If a `qa_route_candidates` entry has an `INTERACTION:` note, or the target component is nested in a list/index page (e.g. DraftPlayerBoard inside the /draft "My Drafts" list), you MUST open an item (click a list card; create one first if the list is empty) BEFORE judging. Reporting passed/failed from the landing or list view without opening an item is a QA failure.
 
 ## Output Format
 

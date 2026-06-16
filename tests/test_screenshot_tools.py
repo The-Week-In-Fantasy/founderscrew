@@ -55,12 +55,15 @@ def test_capture_screenshot_uses_workspace_node_playwright_when_python_missing(t
     def fail_if_python_is_used(url, output_file, errors):
         raise AssertionError("workspace screenshots must not use host Python Playwright")
 
-    def fake_run(cmd, cwd, capture_output, text, timeout, env):
+    def fake_run(cmd, cwd, capture_output, text, encoding, errors, timeout, env):
         assert cmd[0:2] == ["node", "-e"]
         assert cwd == str(workdir)
         assert cmd[-1] == str(workdir)
         assert "secret-password" not in cmd
         assert "bootstrapLogin" in cmd[2]
+        assert "submitLoginCredentials" in cmd[2]
+        assert "clickLoginControlNearPassword" in cmd[2]
+        assert "credentialForm" in cmd[2]
         assert "dismissConsentPopups" in cmd[2]
         assert "waitForAuthToClear" in cmd[2]
         assert "Target route" in cmd[2]
@@ -69,6 +72,8 @@ def test_capture_screenshot_uses_workspace_node_playwright_when_python_missing(t
         assert env["PLAYWRIGHT_TEST_EMAIL"] == "founder@example.com"
         assert env["PLAYWRIGHT_TEST_PASSWORD"] == "secret-password"
         assert "PLAYWRIGHT_TEST_EMAIL" in env["FOUNDERSCREW_QA_EMAIL_KEYS"]
+        assert encoding == "utf-8"
+        assert errors == "replace"
         Path(cmd[-2]).write_bytes(b"png")
 
         class Result:
@@ -126,11 +131,16 @@ def test_diagnose_page_render_uses_workspace_node_playwright(tmp_path, monkeypat
     workdir.mkdir()
     (workdir / "node_modules").mkdir()
 
-    def fake_run(cmd, cwd, capture_output, text, timeout, env):
+    def fake_run(cmd, cwd, capture_output, text, encoding, errors, timeout, env):
         assert cmd[0:2] == ["node", "-e"]
         assert cwd == str(workdir)
+        assert "submitLoginCredentials" in cmd[2]
+        assert "clickLoginControlNearPassword" in cmd[2]
+        assert "credentialForm" in cmd[2]
         assert cmd[-1] == str(workdir)
         assert env["PLAYWRIGHT_BROWSERS_PATH"] == "0"
+        assert encoding == "utf-8"
+        assert errors == "replace"
 
         class Result:
             returncode = 0
@@ -156,16 +166,22 @@ def test_capture_interactive_screenshot_loads_workspace_auth_env(tmp_path, monke
     )
     output_dir = tmp_path / "shots"
 
-    def fake_run(cmd, cwd, capture_output, text, timeout, env):
+    def fake_run(cmd, cwd, capture_output, text, encoding, errors, timeout, env):
         assert cmd[0:2] == ["node", "-e"]
         assert cwd == str(workdir)
         assert "bootstrapLogin" in cmd[2]
+        assert "submitLoginCredentials" in cmd[2]
+        assert "clickLoginControlNearPassword" in cmd[2]
+        assert "credentialForm" in cmd[2]
+        assert "submitMethod" in cmd[2]
         assert "dismissConsentPopups" in cmd[2]
         assert "waitForAuthToClear" in cmd[2]
         assert "Target route" in cmd[2]
         assert "secret-password" not in cmd
         assert env["PLAYWRIGHT_TEST_EMAIL"] == "founder@example.com"
         assert env["PLAYWRIGHT_TEST_PASSWORD"] == "secret-password"
+        assert encoding == "utf-8"
+        assert errors == "replace"
 
         class Result:
             returncode = 0

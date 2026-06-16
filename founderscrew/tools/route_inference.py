@@ -58,12 +58,22 @@ def infer_qa_route_candidates(
         for route in sitemap.routes_by_component.get(route_component, []):
             score = _score_route(route.path, chain, issue_text)
             reason = _route_reason(route, chain, seed_names)
+            hint = _interaction_hint(route, seed_names)
             existing = scored.get(route.path)
             if not existing or score > existing["score"]:
-                scored[route.path] = {"path": route.path, "score": score, "reason": reason}
+                scored[route.path] = {
+                    "path": route.path,
+                    "score": score,
+                    "reason": reason,
+                    "interaction_hint": hint,
+                }
 
     return [
-        {"path": item["path"], "reason": item["reason"]}
+        {
+            "path": item["path"],
+            "reason": item["reason"],
+            "interaction_hint": item.get("interaction_hint", ""),
+        }
         for item in sorted(scored.values(), key=lambda item: (-item["score"], item["path"]))[:limit]
     ]
 
@@ -99,7 +109,13 @@ def build_component_route_sitemap(workdir: str | Path) -> RouteSitemap:
 def format_route_candidates(candidates: List[Dict[str, Any]]) -> str:
     if not candidates:
         return "No route candidates inferred from imports/routes."
-    return "\n".join(f"- {item['path']}: {item.get('reason') or 'inferred from route declarations'}" for item in candidates)
+    lines: List[str] = []
+    for item in candidates:
+        lines.append(f"- {item['path']}: {item.get('reason') or 'inferred from route declarations'}")
+        hint = item.get("interaction_hint")
+        if hint:
+            lines.append(f"    INTERACTION: {hint}")
+    return "\n".join(lines)
 
 
 def _source_files(root: Path) -> List[str]:
@@ -273,6 +289,41 @@ def _score_route(route: str, chain: List[str], issue_text: str) -> int:
     route_tokens = [token for token in re.split(r"[^a-z0-9]+", lowered_route) if token]
     score += sum(12 for token in route_tokens if token in lowered_issue)
     return score
+
+
+# Component name suffixes that denote a detail surface rendered *inside* a page
+# rather than directly at a route. Reaching one usually requires opening an item
+# from a list/index page (e.g. selecting a saved draft) first.
+NESTED_DETAIL_SUFFIXES = (
+    "Board", "Panel", "Tab", "Chart", "Table", "Detail", "Details", "View", "Editor",
+)
+
+
+def _interaction_hint(route: RouteRef, seed_names: Set[str]) -> str:
+    """Hint when the changed/target component is nested inside the routed page.
+
+    Route inference resolves a *path*, but a component like DraftPlayerBoard is
+    rendered inside DraftAssistantPage and is not visible on the initial load of
+    /draft — the QA agent must open an item from the list first. Without this the
+    agent screenshots the index/landing page and may wrongly pass on the wrong view.
+    """
+    nested_targets = sorted(
+        name
+        for name in seed_names
+        if name != route.component
+        and not name.endswith("Page")
+        and name.endswith(NESTED_DETAIL_SUFFIXES)
+    )
+    if not nested_targets:
+        return ""
+    target = nested_targets[0]
+    return (
+        f"{target} renders inside {route.component} and is usually NOT visible on the "
+        f"initial load of {route.path} (that shows a list/index or landing view). "
+        f"Open an item first — e.g. click a saved draft/league/row in the list — to reveal "
+        f"{target}, then screenshot. This is normally a click that stays on {route.path}; "
+        f"if the list is empty, create one item, then open it."
+    )
 
 
 def _route_reason(route: RouteRef, chain: List[str], seed_names: Set[str]) -> str:

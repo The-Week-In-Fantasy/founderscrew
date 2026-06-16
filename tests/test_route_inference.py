@@ -178,3 +178,63 @@ import DraftAssistantPage from './pages/DraftAssistantPage';
     )
 
     assert [candidate["path"] for candidate in candidates] == ["/draft"]
+
+
+def test_nested_detail_component_emits_interaction_hint(tmp_path):
+    (tmp_path / "src/components").mkdir(parents=True)
+    (tmp_path / "src/pages").mkdir(parents=True)
+    (tmp_path / "src/App.jsx").write_text(
+        """
+import DraftAssistantPage from './pages/DraftAssistantPage';
+
+<Route path="/draft" element={<DraftAssistantPage />} />
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "src/components/DraftPlayerBoard.jsx").write_text(
+        "export default function DraftPlayerBoard() { return <div />; }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src/pages/DraftAssistantPage.jsx").write_text(
+        "import DraftPlayerBoard from '../components/DraftPlayerBoard';\nexport default function DraftAssistantPage() { return <DraftPlayerBoard />; }\n",
+        encoding="utf-8",
+    )
+
+    candidates = infer_qa_route_candidates(
+        str(tmp_path),
+        issue_title="DraftPlayerBoard tiles render wrong",
+        affected_files=["src/components/DraftPlayerBoard.jsx"],
+    )
+
+    draft = next(c for c in candidates if c["path"] == "/draft")
+    hint = draft["interaction_hint"]
+    assert "DraftPlayerBoard" in hint
+    assert "Open an item first" in hint
+    # The hint must also surface in the human-readable candidate text shown to QA.
+    assert "INTERACTION:" in format_route_candidates(candidates)
+
+
+def test_routed_page_target_has_no_interaction_hint(tmp_path):
+    (tmp_path / "src/pages").mkdir(parents=True)
+    (tmp_path / "src/App.jsx").write_text(
+        """
+import DraftAssistantPage from './pages/DraftAssistantPage';
+
+<Route path="/draft" element={<DraftAssistantPage />} />
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "src/pages/DraftAssistantPage.jsx").write_text(
+        "export default function DraftAssistantPage() { return <main />; }\n",
+        encoding="utf-8",
+    )
+
+    candidates = infer_qa_route_candidates(
+        str(tmp_path),
+        issue_title="Draft assistant landing tweak",
+        affected_files=["src/pages/DraftAssistantPage.jsx"],
+    )
+
+    draft = next(c for c in candidates if c["path"] == "/draft")
+    assert draft["interaction_hint"] == ""
+    assert "INTERACTION:" not in format_route_candidates(candidates)

@@ -324,6 +324,77 @@ async function dismissConsentPopups(page, result) {
   return false;
 }
 
+async function clickLoginControlNearPassword(page, passwordInput, result) {
+  const match = await passwordInput.evaluate((input) => {
+    const inputRect = input.getBoundingClientRect();
+    const labelPattern = /^(login|log in|sign in)$/i;
+    const visible = (el) => {
+      const style = window.getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    };
+    const candidates = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]'))
+      .filter(visible)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const text = String(el.innerText || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ');
+        const belowPassword = rect.top >= inputRect.bottom - 8;
+        const verticalDistance = Math.abs(rect.top - inputRect.bottom);
+        const horizontalDistance = Math.abs((rect.left + rect.width / 2) - (inputRect.left + inputRect.width / 2));
+        return { el, rect, text, belowPassword, verticalDistance, horizontalDistance };
+      })
+      .filter((candidate) => labelPattern.test(candidate.text) && candidate.belowPassword && candidate.verticalDistance < 260);
+    candidates.sort((a, b) => (a.verticalDistance + a.horizontalDistance / 10) - (b.verticalDistance + b.horizontalDistance / 10));
+    const best = candidates[0];
+    if (!best) return null;
+    return {
+      text: best.text,
+      x: best.rect.left + best.rect.width / 2,
+      y: best.rect.top + best.rect.height / 2,
+    };
+  });
+  if (!match) return false;
+  await page.mouse.click(match.x, match.y);
+  if (result && result.auth) result.auth.submitMethod = `near-password ${match.text} button`;
+  return true;
+}
+
+async function submitLoginCredentials(page, email, password, result) {
+  const emailInput = page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first();
+  const passwordInput = page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first();
+  await emailInput.fill(email, { timeout: 10000 });
+  await passwordInput.fill(password, { timeout: 10000 });
+
+  const credentialForm = page.locator('form').filter({ has: passwordInput }).first();
+  const formSubmit = credentialForm.locator('button[type="submit"], input[type="submit"]').first();
+  if (await formSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await formSubmit.click({ timeout: 10000 });
+    if (result && result.auth) result.auth.submitMethod = 'credential form submit button';
+    return;
+  }
+
+  const namedFormSubmit = credentialForm.locator('button').filter({ hasText: /^(Login|Log In|Sign In)$/i }).last();
+  if (await namedFormSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await namedFormSubmit.click({ timeout: 10000 });
+    if (result && result.auth) result.auth.submitMethod = 'credential form named button';
+    return;
+  }
+
+  const pageSubmit = page.locator('button[type="submit"], input[type="submit"]').last();
+  if (await pageSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await pageSubmit.click({ timeout: 10000 });
+    if (result && result.auth) result.auth.submitMethod = 'page submit button';
+    return;
+  }
+
+  if (await clickLoginControlNearPassword(page, passwordInput, result)) {
+    return;
+  }
+
+  await passwordInput.press('Enter', { timeout: 5000 });
+  if (result && result.auth) result.auth.submitMethod = 'password enter key';
+}
+
 async function bootstrapLogin(page, targetUrl, result) {
   const email = firstEnv(emailKeys);
   const password = firstEnv(passwordKeys);
@@ -337,9 +408,7 @@ async function bootstrapLogin(page, targetUrl, result) {
     await page.goto(loginUrl, { timeout: 30000, waitUntil: 'load' });
     await page.waitForTimeout(1000);
     await dismissConsentPopups(page, result);
-    await page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first().fill(email, { timeout: 10000 });
-    await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().fill(password, { timeout: 10000 });
-    await page.locator('button[type="submit"], button:has-text("Login"), button:has-text("Log In"), button:has-text("Sign In")').first().click({ timeout: 10000 });
+    await submitLoginCredentials(page, email, password, result);
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(1500);
     result.auth.ok = await waitForAuthToClear(page);
@@ -404,6 +473,8 @@ async function bootstrapLogin(page, targetUrl, result) {
             cwd=str(workspace),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=45,
             env=env,
         )
@@ -558,6 +629,71 @@ async function dismissConsentPopups(page) {
   return false;
 }
 
+async function clickLoginControlNearPassword(page, passwordInput) {
+  const match = await passwordInput.evaluate((input) => {
+    const inputRect = input.getBoundingClientRect();
+    const labelPattern = /^(login|log in|sign in)$/i;
+    const visible = (el) => {
+      const style = window.getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    };
+    const candidates = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]'))
+      .filter(visible)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const text = String(el.innerText || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ');
+        const belowPassword = rect.top >= inputRect.bottom - 8;
+        const verticalDistance = Math.abs(rect.top - inputRect.bottom);
+        const horizontalDistance = Math.abs((rect.left + rect.width / 2) - (inputRect.left + inputRect.width / 2));
+        return { el, rect, text, belowPassword, verticalDistance, horizontalDistance };
+      })
+      .filter((candidate) => labelPattern.test(candidate.text) && candidate.belowPassword && candidate.verticalDistance < 260);
+    candidates.sort((a, b) => (a.verticalDistance + a.horizontalDistance / 10) - (b.verticalDistance + b.horizontalDistance / 10));
+    const best = candidates[0];
+    if (!best) return null;
+    return {
+      x: best.rect.left + best.rect.width / 2,
+      y: best.rect.top + best.rect.height / 2,
+    };
+  });
+  if (!match) return false;
+  await page.mouse.click(match.x, match.y);
+  return true;
+}
+
+async function submitLoginCredentials(page, email, password) {
+  const emailInput = page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first();
+  const passwordInput = page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first();
+  await emailInput.fill(email, { timeout: 10000 });
+  await passwordInput.fill(password, { timeout: 10000 });
+
+  const credentialForm = page.locator('form').filter({ has: passwordInput }).first();
+  const formSubmit = credentialForm.locator('button[type="submit"], input[type="submit"]').first();
+  if (await formSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await formSubmit.click({ timeout: 10000 });
+    return;
+  }
+
+  const namedFormSubmit = credentialForm.locator('button').filter({ hasText: /^(Login|Log In|Sign In)$/i }).last();
+  if (await namedFormSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await namedFormSubmit.click({ timeout: 10000 });
+    return;
+  }
+
+  const pageSubmit = page.locator('button[type="submit"], input[type="submit"]').last();
+  if (await pageSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await pageSubmit.click({ timeout: 10000 });
+    return;
+  }
+
+  if (await clickLoginControlNearPassword(page, passwordInput)) {
+    return;
+  }
+
+  await passwordInput.press('Enter', { timeout: 5000 });
+}
+
 async function bootstrapLogin(page, targetUrl) {
   const email = firstEnv(emailKeys);
   const password = firstEnv(passwordKeys);
@@ -565,9 +701,7 @@ async function bootstrapLogin(page, targetUrl) {
   await page.goto(withBase(targetUrl, firstEnv(loginPathKeys) || '/auth'), { timeout: 30000, waitUntil: 'load' });
   await page.waitForTimeout(1000);
   await dismissConsentPopups(page);
-  await page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first().fill(email, { timeout: 10000 });
-  await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().fill(password, { timeout: 10000 });
-  await page.locator('button[type="submit"], button:has-text("Login"), button:has-text("Log In"), button:has-text("Sign In")').first().click({ timeout: 10000 });
+  await submitLoginCredentials(page, email, password);
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(1500);
   if (!(await waitForAuthToClear(page))) {
@@ -605,6 +739,8 @@ async function bootstrapLogin(page, targetUrl) {
             cwd=str(workdir),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=45,
             env=env,
         )
@@ -858,6 +994,77 @@ async function dismissConsentPopups(page, result) {
   return false;
 }
 
+async function clickLoginControlNearPassword(page, passwordInput, result) {
+  const match = await passwordInput.evaluate((input) => {
+    const inputRect = input.getBoundingClientRect();
+    const labelPattern = /^(login|log in|sign in)$/i;
+    const visible = (el) => {
+      const style = window.getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    };
+    const candidates = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], [role="button"]'))
+      .filter(visible)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const text = String(el.innerText || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ');
+        const belowPassword = rect.top >= inputRect.bottom - 8;
+        const verticalDistance = Math.abs(rect.top - inputRect.bottom);
+        const horizontalDistance = Math.abs((rect.left + rect.width / 2) - (inputRect.left + inputRect.width / 2));
+        return { el, rect, text, belowPassword, verticalDistance, horizontalDistance };
+      })
+      .filter((candidate) => labelPattern.test(candidate.text) && candidate.belowPassword && candidate.verticalDistance < 260);
+    candidates.sort((a, b) => (a.verticalDistance + a.horizontalDistance / 10) - (b.verticalDistance + b.horizontalDistance / 10));
+    const best = candidates[0];
+    if (!best) return null;
+    return {
+      text: best.text,
+      x: best.rect.left + best.rect.width / 2,
+      y: best.rect.top + best.rect.height / 2,
+    };
+  });
+  if (!match) return false;
+  await page.mouse.click(match.x, match.y);
+  if (result.auth) result.auth.submitMethod = `near-password ${match.text} button`;
+  return true;
+}
+
+async function submitLoginCredentials(page, email, password, result) {
+  const emailInput = page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first();
+  const passwordInput = page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first();
+  await emailInput.fill(email, { timeout: 10000 });
+  await passwordInput.fill(password, { timeout: 10000 });
+
+  const credentialForm = page.locator('form').filter({ has: passwordInput }).first();
+  const formSubmit = credentialForm.locator('button[type="submit"], input[type="submit"]').first();
+  if (await formSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await formSubmit.click({ timeout: 10000 });
+    if (result.auth) result.auth.submitMethod = 'credential form submit button';
+    return;
+  }
+
+  const namedFormSubmit = credentialForm.locator('button').filter({ hasText: /^(Login|Log In|Sign In)$/i }).last();
+  if (await namedFormSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await namedFormSubmit.click({ timeout: 10000 });
+    if (result.auth) result.auth.submitMethod = 'credential form named button';
+    return;
+  }
+
+  const pageSubmit = page.locator('button[type="submit"], input[type="submit"]').last();
+  if (await pageSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await pageSubmit.click({ timeout: 10000 });
+    if (result.auth) result.auth.submitMethod = 'page submit button';
+    return;
+  }
+
+  if (await clickLoginControlNearPassword(page, passwordInput, result)) {
+    return;
+  }
+
+  await passwordInput.press('Enter', { timeout: 5000 });
+  if (result.auth) result.auth.submitMethod = 'password enter key';
+}
+
 async function bootstrapLogin(page, baseUrl, result) {
   const email = firstEnv(emailKeys);
   const password = firstEnv(passwordKeys);
@@ -870,9 +1077,7 @@ async function bootstrapLogin(page, baseUrl, result) {
     await page.goto(result.auth.loginUrl, { timeout: 30000, waitUntil: 'load' });
     await page.waitForTimeout(1000);
     await dismissConsentPopups(page, result);
-    await page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first().fill(email, { timeout: 10000 });
-    await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().fill(password, { timeout: 10000 });
-    await page.locator('button[type="submit"], button:has-text("Login"), button:has-text("Log In"), button:has-text("Sign In")').first().click({ timeout: 10000 });
+    await submitLoginCredentials(page, email, password, result);
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(1500);
     result.auth.ok = await waitForAuthToClear(page);
@@ -997,6 +1202,8 @@ async function bootstrapLogin(page, baseUrl, result) {
             cwd=str(workspace),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,  # longer timeout for multi-step interactions
             env=env,
         )
