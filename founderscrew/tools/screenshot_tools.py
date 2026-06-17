@@ -1231,6 +1231,44 @@ async function bootstrapLogin(page, baseUrl, result) {
         const msg = `Step ${i} (${step.action}) failed: ${stepError.message || stepError}`;
         result.errors.push(msg);
         result.observations.push(msg);
+        // When a selector-based step fails, the LLM usually guessed a selector
+        // (often an invented data-testid) that does not exist. Report the actual
+        // interactive elements on the page so the next attempt can target a real one.
+        if (step && step.selector) {
+          try {
+            const candidates = await page.evaluate(() => {
+              const visible = (el) => {
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+              };
+              const els = Array.from(document.querySelectorAll('button, a, [role="button"], [data-testid], li, input'));
+              const seen = new Set();
+              const out = [];
+              for (const el of els) {
+                if (!visible(el)) continue;
+                const text = String(el.innerText || el.value || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 48);
+                const testid = el.getAttribute('data-testid');
+                if (!text && !testid) continue;
+                const key = `${el.tagName}|${testid || ''}|${text}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                const entry = { tag: el.tagName.toLowerCase() };
+                const role = el.getAttribute('role');
+                if (role) entry.role = role;
+                if (testid) entry.testid = testid;
+                if (text) entry.text = text;
+                out.push(entry);
+                if (out.length >= 25) break;
+              }
+              return out;
+            });
+            result.observations.push(
+              `Selector "${step.selector}" did not match. data-testid attributes are NOT guaranteed to exist - do not invent them. ` +
+              `Real interactive elements currently on the page (retry with one of these, e.g. text="<text>", a [data-testid] shown below, or role): ${JSON.stringify(candidates)}`
+            );
+          } catch (_) {}
+        }
         // Take an error screenshot so we can see what the page looked like
         try {
           const errPath = path.join(outputDir, `error_step_${i}.png`);

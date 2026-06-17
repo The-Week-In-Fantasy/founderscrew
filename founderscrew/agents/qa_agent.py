@@ -73,11 +73,16 @@ Example for testing a hover tooltip fix:
 ]
 ```
 
-IMPORTANT tips for building selectors:
-- Prefer descriptive CSS selectors: class names, data attributes, IDs
-- Use the files_changed list to guess likely component class names
-- If the issue mentions a specific component (e.g., "DraftPlayerBoard"), try selectors like `.draft-player-board`, `[class*="DraftPlayer"]`, `[class*="draft"]`
-- Always include a fallback: if a specific selector might not exist, also take a general page screenshot
+### Selector strategy — READ THIS, it is the #1 cause of QA failures
+Do NOT invent `data-testid` values or guess CSS class names. Real apps rarely have a `data-testid` matching the component name (e.g. `[data-testid='draft-card']` and `[class*='DraftPlayerBoard']` almost never exist), and React/Tailwind class names are not semantic (there is no `.draft-player-board`). Guessed selectors time out and fail the whole run.
+Prefer, in this order:
+1. **Visible text** you can actually see in the screenshot: `text=Test auction`, `text=View My Drafts`. This is the most reliable way to open a list item.
+2. **Role + name**: `role=button[name="New Draft"]`, or `[role="button"]` for clickable cards/rows (list items are often `div[role="button"]`, `<a>`, or `<li>`, NOT `<button>` with a testid).
+3. **A `data-testid` only if you have CONFIRMED it exists** — from the page's reported elements (see below), not from imagination.
+4. **Structural** selectors targeting the first item in a list container as a last resort.
+When a step fails, the tool reports `Real interactive elements currently on the page: [...]` in its observations — those are the ACTUAL clickable elements (tag, role, testid, text). On your NEXT `capture_interactive_screenshot` call, pick a selector built from that list (usually `text=<the text shown>`). Never re-submit the same selector that just failed.
+To open a draft from the "My Drafts" list, click a visible draft name (e.g. `text=Test auction`) — it opens the DraftPlayerBoard in place on /draft.
+Always also take a general page screenshot as a fallback so there is evidence even if an interaction misses.
 
 ### Phase 4: Evaluate and Report
 Based on the screenshots and interaction results:
