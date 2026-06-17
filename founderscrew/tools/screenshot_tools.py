@@ -365,6 +365,24 @@ async function submitLoginCredentials(page, email, password, result) {
   await emailInput.fill(email, { timeout: 10000 });
   await passwordInput.fill(password, { timeout: 10000 });
 
+  // A consent modal can render after hydration and overlay the form, intercepting
+  // pointer clicks on the submit button. Dismiss it again right before submitting.
+  await dismissConsentPopups(page, result);
+
+  // Primary: submit the form programmatically. requestSubmit() fires the same
+  // submit handler as clicking the button, but is immune to any overlay still
+  // intercepting pointer events (the root cause of QA login flakiness).
+  const submittedViaForm = await passwordInput.evaluate((input) => {
+    const form = input.form || input.closest('form');
+    if (!form || typeof form.requestSubmit !== 'function') return false;
+    form.requestSubmit();
+    return true;
+  }).catch(() => false);
+  if (submittedViaForm) {
+    if (result && result.auth) result.auth.submitMethod = 'form.requestSubmit()';
+    return;
+  }
+
   const credentialForm = page.locator('form').filter({ has: passwordInput }).first();
   const formSubmit = credentialForm.locator('button[type="submit"], input[type="submit"]').first();
   if (await formSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -406,7 +424,9 @@ async function bootstrapLogin(page, targetUrl, result) {
   result.auth = { attempted: true, loginUrl };
   try {
     await page.goto(loginUrl, { timeout: 30000, waitUntil: 'load' });
-    await page.waitForTimeout(1000);
+    // Wait for the auth form to hydrate (the page gates rendering on a beta-status
+    // check) instead of a fixed delay, so the form and any consent modal are present.
+    await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
     await dismissConsentPopups(page, result);
     await submitLoginCredentials(page, email, password, result);
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
@@ -668,6 +688,23 @@ async function submitLoginCredentials(page, email, password) {
   await emailInput.fill(email, { timeout: 10000 });
   await passwordInput.fill(password, { timeout: 10000 });
 
+  // A consent modal can render after hydration and overlay the form, intercepting
+  // pointer clicks on the submit button. Dismiss it again right before submitting.
+  await dismissConsentPopups(page);
+
+  // Primary: submit the form programmatically. requestSubmit() fires the same
+  // submit handler as clicking the button, but is immune to any overlay still
+  // intercepting pointer events (the root cause of QA login flakiness).
+  const submittedViaForm = await passwordInput.evaluate((input) => {
+    const form = input.form || input.closest('form');
+    if (!form || typeof form.requestSubmit !== 'function') return false;
+    form.requestSubmit();
+    return true;
+  }).catch(() => false);
+  if (submittedViaForm) {
+    return;
+  }
+
   const credentialForm = page.locator('form').filter({ has: passwordInput }).first();
   const formSubmit = credentialForm.locator('button[type="submit"], input[type="submit"]').first();
   if (await formSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -699,7 +736,9 @@ async function bootstrapLogin(page, targetUrl) {
   const password = firstEnv(passwordKeys);
   if (!email || !password) return;
   await page.goto(withBase(targetUrl, firstEnv(loginPathKeys) || '/auth'), { timeout: 30000, waitUntil: 'load' });
-  await page.waitForTimeout(1000);
+  // Wait for the auth form to hydrate (the page gates rendering on a beta-status
+  // check) instead of a fixed delay, so the form and any consent modal are present.
+  await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
   await dismissConsentPopups(page);
   await submitLoginCredentials(page, email, password);
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
@@ -1035,6 +1074,24 @@ async function submitLoginCredentials(page, email, password, result) {
   await emailInput.fill(email, { timeout: 10000 });
   await passwordInput.fill(password, { timeout: 10000 });
 
+  // A consent modal can render after hydration and overlay the form, intercepting
+  // pointer clicks on the submit button. Dismiss it again right before submitting.
+  await dismissConsentPopups(page, result);
+
+  // Primary: submit the form programmatically. requestSubmit() fires the same
+  // submit handler as clicking the button, but is immune to any overlay still
+  // intercepting pointer events (the root cause of QA login flakiness).
+  const submittedViaForm = await passwordInput.evaluate((input) => {
+    const form = input.form || input.closest('form');
+    if (!form || typeof form.requestSubmit !== 'function') return false;
+    form.requestSubmit();
+    return true;
+  }).catch(() => false);
+  if (submittedViaForm) {
+    if (result.auth) result.auth.submitMethod = 'form.requestSubmit()';
+    return;
+  }
+
   const credentialForm = page.locator('form').filter({ has: passwordInput }).first();
   const formSubmit = credentialForm.locator('button[type="submit"], input[type="submit"]').first();
   if (await formSubmit.isVisible({ timeout: 1000 }).catch(() => false)) {
@@ -1075,7 +1132,9 @@ async function bootstrapLogin(page, baseUrl, result) {
   result.auth = { attempted: true, loginUrl: withBase(baseUrl, firstEnv(loginPathKeys) || '/auth') };
   try {
     await page.goto(result.auth.loginUrl, { timeout: 30000, waitUntil: 'load' });
-    await page.waitForTimeout(1000);
+    // Wait for the auth form to hydrate (the page gates rendering on a beta-status
+    // check) instead of a fixed delay, so the form and any consent modal are present.
+    await page.locator('input[type="password"], input[name="password"], input[autocomplete="current-password"]').first().waitFor({ state: 'visible', timeout: 20000 }).catch(() => {});
     await dismissConsentPopups(page, result);
     await submitLoginCredentials(page, email, password, result);
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
