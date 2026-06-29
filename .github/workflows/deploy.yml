@@ -29,7 +29,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: 'projects/277445815306/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'gh-deployer@gen-lang-client-0433063216.iam.gserviceaccount.com'
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -57,6 +58,7 @@ jobs:
             GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }}
             GITHUB_TOKEN=${{ secrets.GH_TOKEN }}
             GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+            DASHBOARD_PASSWORD=${{ secrets.DASHBOARD_PASSWORD }}
 
       - name: Deploy Workflow Worker Pool
         run: |
